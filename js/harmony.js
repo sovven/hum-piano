@@ -59,13 +59,16 @@ export function estimateKey(notes) {
   return out;
 }
 
+const SH = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const flatKey = k => (k.mode === 'maj' ? [5, 10, 3, 8, 1, 0] : [2, 7, 0, 5, 10, 3]).includes(k.tonic);
 export const keyName = k => PC[k.tonic] + (k.mode === 'maj' ? ' 大调' : ' 小调');
 
 const VOCAB = {
   maj: {
-    ch: [[0, 'maj'], [2, 'min'], [4, 'min'], [5, 'maj'], [7, 'maj'], [9, 'min']],
-    prior: [1, .5, .35, .9, .9, .8],
-    T: [[0, .1, .1, .3, .3, .2], [.1, 0, .1, .1, .6, .1], [.05, .1, 0, .4, .05, .4], [.35, .1, .05, 0, .35, .15], [.5, 0, .05, .15, 0, .3], [.05, .25, .1, .4, .2, 0]],
+    ch: [[0, 'maj'], [2, 'min'], [4, 'min'], [5, 'maj'], [7, 'maj'], [9, 'min'], [10, 'maj'], [5, 'min'], [4, 'maj']],
+    prior: [1, .5, .35, .9, .9, .8, .1, .1, .1],
+    T: [[0, .1, .1, .3, .3, .2, .06, .03, .05], [.1, 0, .1, .1, .6, .1, .02, .02, .03], [.05, .1, 0, .4, .05, .4, 0, 0, 0], [.35, .1, .05, 0, .35, .15, .04, .25, .02], [.5, 0, .05, .15, 0, .3, .02, .02, .05], [.05, .25, .1, .4, .2, 0, .03, .02, .04],
+      [.4, .03, 0, .45, .05, .07, 0, 0, 0], [.65, .03, 0, .05, .25, 0, 0, 0, 0], [.03, .03, 0, .2, 0, .7, 0, 0, 0]],
     scale: [0, 2, 4, 5, 7, 9, 11]
   },
   min: {
@@ -79,7 +82,7 @@ const VOCAB = {
 export function chordVocab(key) {
   return VOCAB[key.mode].ch.map(([deg, q]) => {
     const root = (key.tonic + deg) % 12;
-    return { root, q, name: PC[root] + (q === 'min' ? 'm' : '') };
+    return { root, q, name: (flatKey(key) ? PC : SH)[root] + (q === 'min' ? 'm' : '') };
   });
 }
 
@@ -90,7 +93,7 @@ function toneWeight(iv, q) {
   return iv === 3 ? .9 : iv === 10 ? .35 : iv === 2 ? .2 : iv === 5 ? .1 : iv === 8 ? -.8 : iv === 1 ? -1.2 : -.6;
 }
 
-export function buildGrid(bt, dur, meter, notes) {
+export function buildGrid(bt, dur, meter, notes, forcePh) {
   const P = bt.period;
   const beats = bt.beats.slice();
   for (let i = 0; i < meter; i++) beats.unshift(beats[0] - P);
@@ -102,10 +105,13 @@ export function buildGrid(bt, dur, meter, notes) {
     if (bd < 0.22 * P) S[j % meter] += Math.min(1.2, n.t1 - n.t0);
   }
   let ph = 0, best = -1;
+  const PS = [];
   for (let p = 0; p < meter; p++) {
     const v = S[p] + (meter === 4 ? 0.5 * S[(p + 2) % 4] : 0);
+    PS.push(v);
     if (v > best) { best = v; ph = p; }
   }
+  if (forcePh != null) ph = forcePh;
   const segs = [];
   const span = meter === 4 ? 2 : meter;
   for (let b = ph; b + span < beats.length; b += span) {
@@ -114,13 +120,13 @@ export function buildGrid(bt, dur, meter, notes) {
     const inBar = ((b - ph) % meter + meter) % meter;
     segs.push({ b0: b, b1: b + span, t0, t1, barStart: inBar === 0, inBar, chord: -1 });
   }
-  return { beats, segs, ph, meter };
+  return { beats, segs, ph, meter, PS };
 }
 
 export function chooseChords(grid, notes, key) {
   const V = VOCAB[key.mode], vocab = chordVocab(key), nC = vocab.length;
   const segs = grid.segs;
-  if (!notes.length || !segs.length) return { vocab, first: 0, last: -1 };
+  if (!notes.length || !segs.length) return { vocab, first: 0, last: -1, score: -1e9 };
   const tA = notes[0].t0, tB = notes[notes.length - 1].t1;
   let first = segs.findIndex(s => s.t1 > tA + 0.05); if (first < 0) first = 0;
   let last = segs.length - 1;
@@ -157,14 +163,15 @@ export function chooseChords(grid, notes, key) {
   D[L - 1][0] += 1.2;
   let c = 0;
   for (let k = 1; k < nC; k++) if (D[L - 1][k] > D[L - 1][c]) c = k;
+  const score = D[L - 1][c] / L;
   for (let i = L - 1; i >= 0; i--) { segs[first + i].chord = c; c = B[i][c]; }
   for (let i = 0; i < segs.length; i++) if (i < first || i > last) segs[i].chord = -1;
-  return { vocab, first, last };
+  return { vocab, first, last, score };
 }
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
-export function arrange(grid, plan, key, style, dur) {
+export function arrange(grid, plan, key, style, dur, notes = []) {
   const { beats, segs, meter } = grid, { vocab, first, last } = plan;
   const ev = [];
   if (last < first) return ev;
@@ -176,14 +183,19 @@ export function arrange(grid, plan, key, style, dur) {
     if (t < 0 || t >= dur - 0.05) return;
     ev.push({ t, m, vel: Math.max(0.08, Math.min(1, vel + (rnd() - 0.5) * 0.07)), dur: Math.max(0.15, end - t) });
   };
-  const voic = ch => {
-    const third = ch.q === 'maj' ? 4 : 3;
-    const tones = [ch.root, ch.root + third, ch.root + 7].map(p => { let m = 48 + (p % 12); while (m < 55) m += 12; while (m > 66) m -= 12; return m; }).sort((a, b) => a - b);
+  const voic = (ch, s) => {
+    let third = ch.q === 'maj' ? 4 : 3, fifth = 7;
+    const held = new Float32Array(12);
+    for (const n of notes) { const ov = Math.min(n.t1, s.t1) - Math.max(n.t0, s.t0); if (ov > 0) held[((n.m - ch.root) % 12 + 12) % 12] += ov * (n.w ?? 1); }
+    const sus = (iv, alts) => { if (held[iv] > 0.12) return iv; for (const q of alts) if (held[q] > 0.28) return q; return iv; };
+    third = sus(third, ch.q === 'maj' ? [5, 3] : [2, 4]);
+    fifth = sus(fifth, [8, 6]);
+    const tones = [ch.root, ch.root + third, ch.root + fifth].map(p => { let m = 48 + (p % 12); while (m < 55) m += 12; while (m > 66) m -= 12; return m; }).sort((a, b) => a - b);
     let bass = 36 + ch.root; if (bass > 45) bass -= 12;
-    return { tones, bass, third };
+    return { tones, bass, third, fifth };
   };
   for (let i = first; i <= last; i++) {
-    const s = segs[i], ch = vocab[s.chord], v = voic(ch);
+    const s = segs[i], ch = vocab[s.chord], v = voic(ch, s);
     const isNew = i === first || s.barStart || segs[i - 1].chord !== s.chord;
     let j = i;
     while (j + 1 <= last && !segs[j + 1].barStart && segs[j + 1].chord === s.chord) j++;
@@ -194,13 +206,13 @@ export function arrange(grid, plan, key, style, dur) {
       for (let k = 0; k < nb; k++) {
         const t = beats[s.b0 + k], strong = isNew && k === 0;
         const pos = s.inBar + k;
-        if (!strong && pos === 2) put(t, v.bass + 7, .38, end);
+        if (!strong && pos === 2) put(t, v.bass + v.fifth, .38, end);
         if (strong || meter === 3 || pos % 2 === 0 || true) v.tones.forEach((m, q) => put(t + q * 0.011, m, strong ? .54 : .3, strong ? end : Math.min(end, beats[s.b0 + k + 1] + 0.1)));
       }
     } else if (style === 'dream') {
       const b = v.bass + 12;
       const ninth = scale.includes((ch.root + 2) % 12) ? 26 : 24;
-      const up = [0, 7, 12, 12 + v.third, 19, ninth, 24 + v.third, 31];
+      const up = [0, v.fifth, 12, 12 + v.third, 12 + v.fifth, ninth, 24 + v.third, 24 + v.fifth];
       const steps = nb * 4;
       for (let q = 0; q < steps; q++) {
         if (isNew && q === 0) continue;
@@ -220,7 +232,7 @@ export function arrange(grid, plan, key, style, dur) {
   }
   const ls = segs[last];
   if (ls.t1 < dur - 0.35) {
-    const v = voic(vocab[ls.chord]);
+    const v = voic(vocab[ls.chord], ls);
     put(ls.t1, v.bass, .6, dur);
     [v.bass + 12, ...v.tones, v.tones[0] + 12].forEach((m, q) => put(ls.t1 + 0.03 + q * 0.035, m, .44, dur));
   }

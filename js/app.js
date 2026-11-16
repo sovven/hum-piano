@@ -7,7 +7,7 @@ const S = {
   ctx: null, vocalBuf: null, pianoBuf: null, video: null, dur: 0,
   pitch: null, notes: [], onset: null, events: [], grid: null, plan: null, key: null, keys: [], tune: null, bt: null,
   style: 'ballad', keyForce: null, tempoF: 1, meter: 4, showChord: true,
-  frameColor: '#FFF3B5', framePattern: 'dots', playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
+  frameColor: '#FFF3B5', framePattern: 'dots', frameW: 24, playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
 };
 
 if (location.search.includes('debug')) window.__hum = S;
@@ -76,12 +76,20 @@ function harmonize() {
   S.key = S.keyForce || S.keys[0];
   const base = trackBeats(S.onset, S.notes, S.dur);
   S.bt = S.tempoF === 1 ? base : trackBeats(S.onset, S.notes, S.dur, base.bpm * S.tempoF);
-  S.grid = buildGrid(S.bt, S.dur, S.meter, S.notes);
-  S.plan = chooseChords(S.grid, S.notes, S.key);
+  const cands = S.keyForce ? [S.keyForce] : S.keys.filter(k => k.score >= S.keys[0].score - 0.08).slice(0, 3);
+  let best = null;
+  for (const key of cands) for (let ph = 0; ph < S.meter; ph++) {
+    const grid = buildGrid(S.bt, S.dur, S.meter, S.notes, ph);
+    const plan = chooseChords(grid, S.notes, key);
+    const mx = Math.max(...grid.PS, 1e-6);
+    const sc = plan.score + 0.5 * grid.PS[ph] / mx + (S.keyForce ? 0 : 2 * key.score);
+    if (!best || sc > best.sc) best = { sc, grid, plan, key };
+  }
+  S.grid = best.grid; S.plan = best.plan; S.key = best.key;
 }
 
 async function synth(first) {
-  S.events = arrange(S.grid, S.plan, S.key, S.style, S.dur);
+  S.events = arrange(S.grid, S.plan, S.key, S.style, S.dur, S.notes);
   S.pianoBuf = await renderPiano(S.events, S.dur, S.tune.at, 44100, p => first && work('钢琴在弹了…', .7 + p * .28));
   if (S.playing) startSources(now());
 }
@@ -130,7 +138,7 @@ const cv = $('cv'), g = cv.getContext('2d');
 let W = 1080, MH = 810, KH = 150, whites = [];
 
 function setupCanvas() {
-  if (S.video) { W = 1080; const m = 24, pad = 0, vw = W - 2 * (m + pad), vh = Math.round(vw * S.video.videoHeight / S.video.videoWidth); S.vr = { x: m + pad, y: m + pad, w: vw, h: vh, m }; MH = vh + 2 * (m + pad); }
+  if (S.video) { W = 1080; const m = S.frameW, pad = 0, vw = W - 2 * (m + pad), vh = Math.round(vw * S.video.videoHeight / S.video.videoWidth); S.vr = { x: m + pad, y: m + pad, w: vw, h: vh, m }; MH = vh + 2 * (m + pad); }
   else { W = 1080; MH = 1302; }
   whites = []; for (let m = LO; m <= HI; m++) if (!BLACK.includes(m % 12)) whites.push(m);
   KH = Math.round(W / whites.length * 4.6);
@@ -154,7 +162,7 @@ function paintFrame(c, w, h) {
     c.globalAlpha = 1; return;
   }
   if (p === 'plain') return;
-  const step = p === 'dots' ? 22 : p === 'stars' ? 27 : 19;
+  const step = p === 'dots' ? 22 : p === 'stars' ? 27 : 24;
   for (let y = step / 2, r = 0; y < h + step; y += step, r++) for (let x = (r % 2) * step + step / 2; x < w + step; x += step * 2) {
     if (p === 'dots') { c.beginPath(); c.arc(x, y, 4.2, 0, 7); c.fill(); }
     else if (p === 'stars') {
@@ -162,17 +170,19 @@ function paintFrame(c, w, h) {
       for (let k = 0; k < 10; k++) { const rr = k % 2 ? 3.4 : 8, an = k * Math.PI / 5 - Math.PI / 2; c.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); }
       c.closePath(); c.fill(); c.restore();
     } else {
-      const blue = (n & 255) > (n >> 16) + 12;
-      c.save(); c.translate(x, y); c.rotate([0.2, 2.3, -0.9, 3.6, 1.2, -2.2][(r * 2 + Math.round(x / step)) % 6]);
-      c.strokeStyle = '#6E8467'; c.lineWidth = 1.4; c.lineCap = 'round';
-      c.beginPath(); c.moveTo(-10, 11); c.quadraticCurveTo(-3, 7, 3, -3); c.moveTo(-4, 6); c.quadraticCurveTo(-7, 1, -6, -3); c.stroke();
-      c.fillStyle = '#819A78';
-      c.beginPath(); c.ellipse(-9, 6, 4.4, 1.9, -0.5, 0, 7); c.fill();
-      c.beginPath(); c.ellipse(1, 7, 4.4, 1.9, 0.8, 0, 7); c.fill();
-      c.fillStyle = blue ? '#F3AFC0' : '#93A6DE';
-      for (let k = 0; k < 5; k++) { const an = k * 1.2566; c.beginPath(); c.arc(4 + Math.cos(an) * 3.5, -6 + Math.sin(an) * 3.5, 2.9, 0, 7); c.fill(); }
-      c.beginPath(); c.arc(-6, -5, 2.4, 0, 7); c.fill();
-      c.fillStyle = blue ? '#D97C96' : '#5F74BC'; c.beginPath(); c.arc(4, -6, 1.7, 0, 7); c.fill();
+      const blue = (n & 255) > (n >> 16) + 12, dark = lum < 0.62;
+      const leaf = (lx, ly, len, wd, rot) => { c.save(); c.translate(lx, ly); c.rotate(rot); c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(len * 0.45, -wd, len, 0); c.quadraticCurveTo(len * 0.45, wd, 0, 0); c.fill(); c.restore(); };
+      c.save(); c.translate(x, y); c.rotate([0.3, 2.5, -1.1, 3.9, 1.4, -2.4, 0.9, 4.6][(r * 3 + Math.round(x / step)) % 8]);
+      c.strokeStyle = dark ? '#F4EEDC' : '#6C7455'; c.lineWidth = 1.1; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(-9, 10); c.quadraticCurveTo(-4, 5, 1, -1); c.stroke();
+      c.fillStyle = dark ? '#E9E4CC' : '#7E8862';
+      leaf(-6, 7, 8.5, 2.6, -2.5); leaf(-3, 3.5, 8, 2.5, 0.25); leaf(-8, 9, 6, 2, 1.9);
+      const pc = blue ? ['#F0B4C2', '#DE8FA4', '#C9708A'] : ['#A3AEDB', '#8792C8', '#636EAB'];
+      c.fillStyle = pc[0];
+      for (let k = 0; k < 5; k++) { const an = k * 1.2566 + 0.4; c.beginPath(); c.ellipse(3 + Math.cos(an) * 3.1, -4.5 + Math.sin(an) * 3.1, 3, 2.5, an, 0, 7); c.fill(); }
+      c.fillStyle = pc[1];
+      for (let k = 0; k < 3; k++) { const an = k * 1.2566 + 2.1; c.beginPath(); c.ellipse(3 + Math.cos(an) * 2.6, -4.5 + Math.sin(an) * 2.6, 2, 1.5, an, 0, 7); c.fill(); }
+      c.fillStyle = pc[2]; c.beginPath(); c.arc(3, -4.5, 1.3, 0, 7); c.fill();
       c.fillStyle = ink;
       c.restore();
     }
@@ -418,14 +428,16 @@ document.querySelector('.mini').onclick = e => {
   document.querySelectorAll('.mini button').forEach(x => x.classList.toggle('on', x === b));
   S.tempoF = +b.dataset.f; rethink();
 };
-try { const s = JSON.parse(localStorage.getItem('hum-frame')); if (s && /^#[0-9a-f]{6}$/i.test(s.c)) { S.frameColor = s.c; S.framePattern = s.p; } } catch { }
+try { const s = JSON.parse(localStorage.getItem('hum-frame')); if (s && /^#[0-9a-f]{6}$/i.test(s.c)) { S.frameColor = s.c; S.framePattern = s.p; if ([24, 46, 76].includes(s.w)) S.frameW = s.w; } } catch { }
 const frameUI = () => {
   document.querySelectorAll('#swatches button').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === S.frameColor.toLowerCase()));
   document.querySelectorAll('#patterns button').forEach(b => b.classList.toggle('on', b.dataset.p === S.framePattern));
   $('customcol').value = S.frameColor;
-  try { localStorage.setItem('hum-frame', JSON.stringify({ c: S.frameColor, p: S.framePattern })); } catch { }
-  if (S.grid) S.cover = makeCover();
+  try { localStorage.setItem('hum-frame', JSON.stringify({ c: S.frameColor, p: S.framePattern, w: S.frameW })); } catch { }
+  document.querySelectorAll('#framew button').forEach(b => b.classList.toggle('on', +b.dataset.w === S.frameW));
+  if (S.grid) setupCanvas();
 };
+$('framew').onclick = e => { const b = e.target.closest('button'); if (b) { S.frameW = +b.dataset.w; frameUI(); } };
 $('swatches').onclick = e => { const b = e.target.closest('button'); if (b) { S.frameColor = b.dataset.c; frameUI(); } };
 $('customcol').oninput = e => { S.frameColor = e.target.value; frameUI(); };
 $('patterns').onclick = e => { const b = e.target.closest('button'); if (b) { S.framePattern = b.dataset.p; frameUI(); } };
