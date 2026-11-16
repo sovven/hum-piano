@@ -12,7 +12,7 @@ export async function resampleMono(audioBuffer, sr = 16000) {
 
 export async function trackPitch(x, sr, onProgress) {
   const hop = 160, W = 512;
-  const tauMin = Math.floor(sr / 900), tauMax = Math.ceil(sr / 65);
+  const tauMin = Math.floor(sr / 900), tauMax = Math.ceil(sr / 75);
   const n = Math.max(0, Math.floor((x.length - W - tauMax) / hop));
   const midi = new Float32Array(n), cm = new Float32Array(n), rms = new Float32Array(n);
   const d = new Float32Array(tauMax + 2);
@@ -45,7 +45,7 @@ export async function trackPitch(x, sr, onProgress) {
     const off = den > 1e-9 ? 0.5 * (a - c) / den : 0;
     const f = sr / (best + Math.max(-1, Math.min(1, off)));
     midi[i] = 69 + 12 * Math.log2(f / 440);
-    cm[i] = b;
+    cm[i] = best >= tauMax - 1 ? 1 : b;
     if (i % 150 === 0) { onProgress && onProgress(i / n); await tick(); }
   }
   let mx = 0;
@@ -104,6 +104,10 @@ export function segmentNotes(pt) {
     cur.ps.push(p);
   }
   close();
+  if (notes.length > 4) {
+    const ps = notes.map(n => n.p).sort((p, q) => p - q), med = ps[ps.length >> 1];
+    return notes.filter(n => Math.abs(n.p - med) <= 14);
+  }
   return notes;
 }
 

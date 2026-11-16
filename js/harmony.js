@@ -34,6 +34,7 @@ export function estimateTuning(notes, dur) {
     n.m = Math.round(d);
     n.dev = (d - n.m) * 100;
     const w = n.t1 - n.t0;
+    n.w = Math.max(0.15, Math.min(1, (w - 0.06) / 0.2)) * (1 - 0.6 * Math.min(1, Math.abs(n.dev) / 50));
     dev += Math.abs(n.dev) * w; wsum += w;
   }
   let lo = 1e9, hi = -1e9;
@@ -43,7 +44,7 @@ export function estimateTuning(notes, dur) {
 
 export function estimateKey(notes) {
   const h = new Float32Array(12);
-  for (const n of notes) h[((n.m % 12) + 12) % 12] += n.t1 - n.t0;
+  for (const n of notes) h[((n.m % 12) + 12) % 12] += (n.t1 - n.t0) * n.w;
   const corr = (prof, tonic) => {
     let mh = 0, mp = 0;
     for (let i = 0; i < 12; i++) { mh += h[i]; mp += prof[i]; }
@@ -131,7 +132,7 @@ export function chooseChords(grid, notes, key) {
       const ov = Math.min(n.t1, s.t1) - Math.max(n.t0, s.t0);
       if (ov <= 0) continue;
       const head = n.t0 >= s.t0 - 0.08 && n.t0 < s.t0 + len * 0.3 ? 1.6 : 1;
-      for (let c = 0; c < nC; c++) row[c] += ov * head * toneWeight(((n.m - vocab[c].root) % 12 + 12) % 12, vocab[c].q);
+      for (let c = 0; c < nC; c++) row[c] += ov * n.w * head * toneWeight(((n.m - vocab[c].root) % 12 + 12) % 12, vocab[c].q);
     }
     for (let c = 0; c < nC; c++) row[c] = row[c] / len;
     E.push(row);

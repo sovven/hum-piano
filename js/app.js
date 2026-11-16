@@ -10,6 +10,8 @@ const S = {
   playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
 };
 
+if (location.search.includes('debug')) window.__hum = S;
+
 const setState = s => { document.body.dataset.state = s; };
 const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 let toastT;
@@ -128,14 +130,14 @@ const cv = $('cv'), g = cv.getContext('2d');
 let W = 1080, MH = 810, KH = 150, whites = [];
 
 function setupCanvas() {
-  if (S.video) { W = Math.min(1280, Math.max(540, S.video.videoWidth)); W -= W % 2; MH = Math.round(W * S.video.videoHeight / S.video.videoWidth); }
+  if (S.video) { W = 1080; const m = 56, pad = 18, vw = W - 2 * (m + pad), vh = Math.round(vw * S.video.videoHeight / S.video.videoWidth); S.vr = { x: m + pad, y: m + pad, w: vw, h: vh, m }; MH = vh + 2 * (m + pad); }
   else { W = 1080; MH = 1302; }
   whites = []; for (let m = LO; m <= HI; m++) if (!BLACK.includes(m % 12)) whites.push(m);
   KH = Math.round(W / whites.length * 4.6);
   MH -= MH % 2; KH -= KH % 2;
   cv.width = W; cv.height = MH + KH;
-  S.cover = S.video ? null : makeCover();
-  document.fonts.load('500 30px Poppins').then(() => { if (S.cover) S.cover = makeCover(); });
+  S.cover = makeCover();
+  document.fonts.load('500 30px Poppins').then(() => { if (S.grid) S.cover = makeCover(); });
 }
 
 function daisy(c, x, y, r, rot = 0) {
@@ -151,14 +153,18 @@ function makeCover() {
   c.fillStyle = '#FFF3B5'; c.fillRect(0, 0, W, MH);
   c.fillStyle = '#fff';
   for (let y = 0, r = 0; y < MH + 30; y += 27, r++) for (let x = (r % 2) * 27; x < W + 30; x += 54) { c.beginPath(); c.arc(x, y, 5.5, 0, 7); c.fill(); }
-  const px = 90, py = 150, pw = W - 180, ph = MH - 300;
+  const vid = !!S.video;
+  const px = vid ? S.vr.m : 90, py = vid ? S.vr.m : 150, pw = W - 2 * px, ph = MH - 2 * py;
+  const deco = document.createElement("canvas"); deco.width = W; deco.height = MH;
+  const dc = vid ? deco.getContext("2d") : c;
   c.shadowColor = 'rgba(150,120,20,.25)'; c.shadowBlur = 40; c.shadowOffsetY = 16;
   c.fillStyle = '#FFFFFB'; c.beginPath(); c.roundRect(px, py, pw, ph, 28); c.fill();
   c.shadowColor = 'transparent';
-  c.setLineDash([7, 7]); c.strokeStyle = '#E6D88F'; c.lineWidth = 2; c.beginPath(); c.roundRect(px + 16, py + 16, pw - 32, ph - 32, 18); c.stroke(); c.setLineDash([]);
-  daisy(c, px + 30, py + 26, 62, .3); daisy(c, px + pw - 40, py + ph - 20, 78, -.2); daisy(c, px + pw - 120, py + ph + 14, 34, .6);
-  c.fillStyle = '#8DB3F2';
-  for (const [x, y] of [[px + pw - 70, py + 50], [px + 80, py + ph - 46]]) { for (let i = 0; i < 4; i++) { c.beginPath(); c.arc(x + Math.cos(i * 1.571) * 9, y + Math.sin(i * 1.571) * 9, 8, 0, 7); c.fill(); } c.fillStyle = '#fff'; c.beginPath(); c.arc(x, y, 4, 0, 7); c.fill(); c.fillStyle = '#8DB3F2'; }
+  if (!vid) { c.setLineDash([7, 7]); c.strokeStyle = '#E6D88F'; c.lineWidth = 2; c.beginPath(); c.roundRect(px + 16, py + 16, pw - 32, ph - 32, 18); c.stroke(); c.setLineDash([]); }
+  daisy(dc, px + 22, py + 18, 60, .3); daisy(dc, px + pw - 30, py + ph - 14, 76, -.2); daisy(dc, px + pw - 112, py + ph + 16, 34, .6);
+  dc.fillStyle = '#8DB3F2';
+  for (const [x, y] of vid ? [[px + pw - 8, py + 34], [px + 10, py + ph - 40]] : [[px + pw - 70, py + 50], [px + 80, py + ph - 46]]) { for (let i = 0; i < 4; i++) { dc.beginPath(); dc.arc(x + Math.cos(i * 1.571) * 9, y + Math.sin(i * 1.571) * 9, 8, 0, 7); dc.fill(); } dc.fillStyle = '#fff'; dc.beginPath(); dc.arc(x, y, 4, 0, 7); dc.fill(); dc.fillStyle = '#8DB3F2'; }
+  if (vid) return { canvas: o, deco, px, py, pw, ph };
   c.fillStyle = '#5F87D9'; c.textAlign = 'center';
   c.font = '500 30px Poppins, sans-serif'; c.letterSpacing = '5px';
   c.fillText('a cappella  ·  piano ver.', W / 2, py + 96);
@@ -167,8 +173,12 @@ function makeCover() {
 
 function drawMedia(t) {
   if (S.video) {
-    g.fillStyle = '#111'; g.fillRect(0, 0, W, MH);
-    try { g.drawImage(S.video, 0, 0, W, MH); } catch { }
+    const r = S.vr;
+    g.drawImage(S.cover.canvas, 0, 0);
+    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 14); g.clip();
+    g.fillStyle = '#F3EBC8'; g.fillRect(r.x, r.y, r.w, r.h);
+    try { g.drawImage(S.video, r.x, r.y, r.w, r.h); } catch { }
+    g.restore(); g.drawImage(S.cover.deco, 0, 0);
     return;
   }
   const { canvas, px, py, pw, ph } = S.cover;
@@ -229,7 +239,8 @@ function draw() {
     g.font = `500 ${Math.round(fs * 0.8)}px Poppins, sans-serif`;
     if (S.video) {
       g.textAlign = 'left'; g.lineWidth = fs * 0.12; g.strokeStyle = 'rgba(60,50,30,.35)'; g.lineJoin = 'round';
-      g.strokeText(ch, W * 0.035, MH - fs * 0.5); g.fillStyle = '#FFFBE6'; g.fillText(ch, W * 0.035, MH - fs * 0.5);
+      const cx = S.vr.x + S.vr.w * 0.04, cy = S.vr.y + S.vr.h - fs * 0.55;
+      g.strokeText(ch, cx, cy); g.fillStyle = '#FFFBE6'; g.fillText(ch, cx, cy);
     } else { g.textAlign = 'center'; g.fillStyle = '#4B4436'; g.font = `500 ${fs * 1.15}px Poppins, sans-serif`; g.fillText(ch, W / 2, S.cover.py + S.cover.ph - 62); }
   }
   if (!seeking) { $('seek').value = S.dur ? t / S.dur * 1000 : 0; fill($('seek')); }
