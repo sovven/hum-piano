@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="theme-color" content="#FFE98A">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>哼一段 · hum &amp; keys</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-state="empty">
+<header class="top">
+  <div class="mark"><i>hum &amp; keys</i></div>
+  <h1>哼一段，<span>钢琴替你接住</span></h1>
+  <p class="sub">清唱、哼歌、甚至说话都行 —— 它会听出你的调，跟着你的音准配一段钢琴。</p>
+</header>
+
+<main>
+  <section class="card" id="card">
+    <div class="view" id="v-empty">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="video/*,audio/*" hidden>
+        <span class="daisy" aria-hidden="true"></span>
+        <b>把清唱的视频或录音放进来</b>
+        <small>拖到这里，或点一下选择 · 建议 3 分钟以内</small>
+      </label>
+      <div class="or"><span>or</span></div>
+      <div class="row">
+        <button class="btn" id="b-cam"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="11" rx="3"/><path d="M16 11l5-3v9l-5-3z"/></svg>现在拍一段</button>
+        <button class="btn ghost" id="b-mic"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>只录声音</button>
+      </div>
+      <button class="link" id="b-demo">没想好唱什么？先听个示例</button>
+    </div>
+
+    <div class="view" id="v-capture">
+      <div class="capbox" id="capbox">
+        <video id="camv" playsinline muted></video>
+        <div class="micviz" id="micviz"><span class="daisy big"></span><canvas id="micwave" width="600" height="120"></canvas></div>
+        <div class="timer" id="timer">0:00</div>
+      </div>
+      <p class="hint" id="caphint">准备好就按下去，唱完再按一次</p>
+      <div class="row">
+        <button class="rec" id="b-rec" aria-label="开始录制"><i></i></button>
+      </div>
+      <button class="link" id="b-capback">返回</button>
+    </div>
+
+    <div class="view" id="v-work">
+      <div class="spin"><span class="daisy big"></span></div>
+      <p class="worktxt" id="worktxt">正在听你的声音…</p>
+      <div class="bar"><i id="workbar"></i></div>
+    </div>
+
+    <div class="view" id="v-ready">
+      <div class="stage"><canvas id="cv"></canvas></div>
+      <div class="transport">
+        <button class="play" id="b-play" aria-label="播放"><svg viewBox="0 0 24 24" id="ic-play"><path d="M8 5.5v13l11-6.5z"/></svg></button>
+        <input type="range" id="seek" min="0" max="1000" value="0" class="seek">
+        <span class="time" id="time">0:00 / 0:00</span>
+      </div>
+      <ul class="facts" id="facts"></ul>
+      <p class="tuneline" id="tuneline"></p>
+
+      <div class="group">
+        <h3><i>style</i>伴奏感觉</h3>
+        <div class="seg" id="styles">
+          <button data-s="ballad" class="on">温柔分解</button>
+          <button data-s="block">柱式和弦</button>
+          <button data-s="dream">梦幻琶音</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3><i>chords</i>和弦 <small>不喜欢哪个就点它换掉</small></h3>
+        <div class="chords" id="chords"></div>
+      </div>
+
+      <div class="group two">
+        <label>钢琴音量<input type="range" id="vol-p" min="0" max="150" value="90"></label>
+        <label>人声音量<input type="range" id="vol-v" min="0" max="150" value="100"></label>
+      </div>
+
+      <details class="more">
+        <summary>微调</summary>
+        <div class="group two">
+          <label>调性<select id="keysel"></select></label>
+          <label>拍号<select id="meter"><option value="4">4/4</option><option value="3">3/4</option></select></label>
+        </div>
+        <div class="group two">
+          <label>速度<span class="mini"><button data-f="0.5">慢一半</button><button data-f="1" class="on">自动</button><button data-f="2">快一倍</button></span></label>
+          <label class="check"><input type="checkbox" id="showchord" checked>画面里显示和弦名</label>
+        </div>
+      </details>
+
+      <div class="row end">
+        <button class="btn" id="b-export"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg>保存视频</button>
+        <button class="btn ghost" id="b-wav">只要钢琴伴奏</button>
+      </div>
+      <button class="link" id="b-again">换一段</button>
+    </div>
+    <div class="lace" aria-hidden="true"></div>
+  </section>
+  <p class="foot"><i>made with a little piano</i> · 全部在你的浏览器里完成，不上传任何东西</p>
+</main>
+
+<div class="pop" id="pop" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
