@@ -108,6 +108,13 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.25)}
 .seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--butter);padding:4px;border-radius:14px}
 .seg button,.mini button{border:0;background:none;font:inherit;color:var(--ink-2);padding:10px 4px;border-radius:11px;cursor:pointer;transition:background .25s,color .25s,box-shadow .25s}
 .seg button.on,.mini button.on{background:var(--paper);color:var(--blue-d);font-weight:600;box-shadow:0 2px 6px rgba(150,120,20,.14)}
+.seg.five{grid-template-columns:repeat(5,1fr)}
+.swatches{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.swatches button,.swatches .custom{width:32px;height:32px;border-radius:50%;border:0;padding:0;cursor:pointer;background:var(--c);box-shadow:0 0 0 1px #E4DBB6,0 0 0 4px var(--paper);transition:transform .2s,box-shadow .2s}
+.swatches button:hover,.swatches .custom:hover{transform:scale(1.1)}
+.swatches button.on{box-shadow:0 0 0 1px #E4DBB6,0 0 0 3px var(--paper),0 0 0 5px var(--blue)}
+.swatches .custom{position:relative;overflow:hidden;background:conic-gradient(#FBD5DD,#FFF3B5,#D5E6C8,#CFE0FB,#E3DAF6,#FBD5DD)}
+.swatches .custom input{position:absolute;inset:-8px;width:60px;height:60px;opacity:0;cursor:pointer}
 .chords{display:flex;flex-wrap:wrap;gap:6px 0;align-items:center}
 .chords .bar-sep{width:1px;height:22px;background:var(--line);margin:0 7px}
 .chords button{min-width:42px;border:0;background:var(--blue-l);color:var(--blue-d);font:500 13px/1 var(--serif);padding:8px 10px;border-radius:10px;cursor:pointer;margin-right:3px;transition:background .2s,color .2s,transform .2s}

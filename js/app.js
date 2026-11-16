@@ -7,7 +7,7 @@ const S = {
   ctx: null, vocalBuf: null, pianoBuf: null, video: null, dur: 0,
   pitch: null, notes: [], onset: null, events: [], grid: null, plan: null, key: null, keys: [], tune: null, bt: null,
   style: 'ballad', keyForce: null, tempoF: 1, meter: 4, showChord: true,
-  playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
+  frameColor: '#FFF3B5', framePattern: 'dots', playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
 };
 
 if (location.search.includes('debug')) window.__hum = S;
@@ -130,7 +130,7 @@ const cv = $('cv'), g = cv.getContext('2d');
 let W = 1080, MH = 810, KH = 150, whites = [];
 
 function setupCanvas() {
-  if (S.video) { W = 1080; const m = 56, pad = 18, vw = W - 2 * (m + pad), vh = Math.round(vw * S.video.videoHeight / S.video.videoWidth); S.vr = { x: m + pad, y: m + pad, w: vw, h: vh, m }; MH = vh + 2 * (m + pad); }
+  if (S.video) { W = 1080; const m = 22, pad = 8, vw = W - 2 * (m + pad), vh = Math.round(vw * S.video.videoHeight / S.video.videoWidth); S.vr = { x: m + pad, y: m + pad, w: vw, h: vh, m }; MH = vh + 2 * (m + pad); }
   else { W = 1080; MH = 1302; }
   whites = []; for (let m = LO; m <= HI; m++) if (!BLACK.includes(m % 12)) whites.push(m);
   KH = Math.round(W / whites.length * 4.6);
@@ -140,31 +140,46 @@ function setupCanvas() {
   document.fonts.load('500 30px Poppins').then(() => { if (S.grid) S.cover = makeCover(); });
 }
 
-function daisy(c, x, y, r, rot = 0) {
-  c.save(); c.translate(x, y); c.rotate(rot);
-  c.fillStyle = '#fff'; c.strokeStyle = '#EADFAE'; c.lineWidth = r * 0.03;
-  for (let i = 0; i < 8; i++) { c.rotate(Math.PI / 4); c.beginPath(); c.ellipse(0, -r * 0.55, r * 0.22, r * 0.46, 0, 0, 7); c.fill(); c.stroke(); }
-  c.fillStyle = '#FFC94A'; c.beginPath(); c.arc(0, 0, r * 0.26, 0, 7); c.fill();
-  c.restore();
+function paintFrame(c, w, h) {
+  const col = S.frameColor, n = parseInt(col.slice(1), 16);
+  const lum = (0.299 * (n >> 16) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255;
+  const ink = lum > 0.95 ? '#F3E3A0' : '#FFFFFF';
+  c.fillStyle = col; c.fillRect(0, 0, w, h);
+  c.fillStyle = ink;
+  const p = S.framePattern;
+  if (p === 'check') {
+    c.globalAlpha = 0.5;
+    for (let x = 0; x < w; x += 36) c.fillRect(x, 0, 18, h);
+    for (let y = 0; y < h; y += 36) c.fillRect(0, y, w, 18);
+    c.globalAlpha = 1; return;
+  }
+  if (p === 'plain') return;
+  const step = p === 'dots' ? 22 : p === 'stars' ? 27 : 30;
+  for (let y = step / 2, r = 0; y < h + step; y += step, r++) for (let x = (r % 2) * step + step / 2; x < w + step; x += step * 2) {
+    if (p === 'dots') { c.beginPath(); c.arc(x, y, 4.2, 0, 7); c.fill(); }
+    else if (p === 'stars') {
+      c.save(); c.translate(x, y); c.rotate(((r * 7 + x) % 5) * 0.25); c.beginPath();
+      for (let k = 0; k < 10; k++) { const rr = k % 2 ? 3.4 : 8, an = k * Math.PI / 5 - Math.PI / 2; c.lineTo(Math.cos(an) * rr, Math.sin(an) * rr); }
+      c.closePath(); c.fill(); c.restore();
+    } else {
+      c.save(); c.translate(x, y); c.rotate((r + x) % 3);
+      for (let k = 0; k < 5; k++) { c.rotate(Math.PI * 2 / 5); c.beginPath(); c.ellipse(0, -5.4, 2.9, 4.6, 0, 0, 7); c.fill(); }
+      c.fillStyle = lum > 0.95 ? '#fff' : '#FFCB52'; c.beginPath(); c.arc(0, 0, 2.6, 0, 7); c.fill(); c.fillStyle = ink;
+      c.restore();
+    }
+  }
 }
 function makeCover() {
   const o = document.createElement('canvas'); o.width = W; o.height = MH;
   const c = o.getContext('2d');
-  c.fillStyle = '#FFF3B5'; c.fillRect(0, 0, W, MH);
-  c.fillStyle = '#fff';
-  for (let y = 0, r = 0; y < MH + 30; y += 27, r++) for (let x = (r % 2) * 27; x < W + 30; x += 54) { c.beginPath(); c.arc(x, y, 5.5, 0, 7); c.fill(); }
+  paintFrame(c, W, MH);
   const vid = !!S.video;
-  const px = vid ? S.vr.m : 90, py = vid ? S.vr.m : 150, pw = W - 2 * px, ph = MH - 2 * py;
-  const deco = document.createElement("canvas"); deco.width = W; deco.height = MH;
-  const dc = vid ? deco.getContext("2d") : c;
-  c.shadowColor = 'rgba(150,120,20,.25)'; c.shadowBlur = 40; c.shadowOffsetY = 16;
-  c.fillStyle = '#FFFFFB'; c.beginPath(); c.roundRect(px, py, pw, ph, 28); c.fill();
+  const px = vid ? S.vr.m : 40, py = vid ? S.vr.m : 40, pw = W - 2 * px, ph = MH - 2 * py;
+  c.shadowColor = 'rgba(60,50,20,.16)'; c.shadowBlur = 26; c.shadowOffsetY = 8;
+  c.fillStyle = '#FFFFFB'; c.beginPath(); c.roundRect(px, py, pw, ph, 22); c.fill();
   c.shadowColor = 'transparent';
-  if (!vid) { c.setLineDash([7, 7]); c.strokeStyle = '#E6D88F'; c.lineWidth = 2; c.beginPath(); c.roundRect(px + 16, py + 16, pw - 32, ph - 32, 18); c.stroke(); c.setLineDash([]); }
-  daisy(dc, px + 22, py + 18, 60, .3); daisy(dc, px + pw - 30, py + ph - 14, 76, -.2); daisy(dc, px + pw - 112, py + ph + 16, 34, .6);
-  dc.fillStyle = '#8DB3F2';
-  for (const [x, y] of vid ? [[px + pw - 8, py + 34], [px + 10, py + ph - 40]] : [[px + pw - 70, py + 50], [px + 80, py + ph - 46]]) { for (let i = 0; i < 4; i++) { dc.beginPath(); dc.arc(x + Math.cos(i * 1.571) * 9, y + Math.sin(i * 1.571) * 9, 8, 0, 7); dc.fill(); } dc.fillStyle = '#fff'; dc.beginPath(); dc.arc(x, y, 4, 0, 7); dc.fill(); dc.fillStyle = '#8DB3F2'; }
-  if (vid) return { canvas: o, deco, px, py, pw, ph };
+  if (vid) return { canvas: o, px, py, pw, ph };
+  c.setLineDash([7, 7]); c.strokeStyle = '#E9E2C8'; c.lineWidth = 2; c.beginPath(); c.roundRect(px + 16, py + 16, pw - 32, ph - 32, 14); c.stroke(); c.setLineDash([]);
   c.fillStyle = '#5F87D9'; c.textAlign = 'center';
   c.font = '500 30px Poppins, sans-serif'; c.letterSpacing = '5px';
   c.fillText('a cappella  ·  piano ver.', W / 2, py + 96);
@@ -175,10 +190,10 @@ function drawMedia(t) {
   if (S.video) {
     const r = S.vr;
     g.drawImage(S.cover.canvas, 0, 0);
-    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 14); g.clip();
+    g.save(); g.beginPath(); g.roundRect(r.x, r.y, r.w, r.h, 15); g.clip();
     g.fillStyle = '#F3EBC8'; g.fillRect(r.x, r.y, r.w, r.h);
     try { g.drawImage(S.video, r.x, r.y, r.w, r.h); } catch { }
-    g.restore(); g.drawImage(S.cover.deco, 0, 0);
+    g.restore();
     return;
   }
   const { canvas, px, py, pw, ph } = S.cover;
@@ -398,6 +413,18 @@ document.querySelector('.mini').onclick = e => {
   document.querySelectorAll('.mini button').forEach(x => x.classList.toggle('on', x === b));
   S.tempoF = +b.dataset.f; rethink();
 };
+try { const s = JSON.parse(localStorage.getItem('hum-frame')); if (s && /^#[0-9a-f]{6}$/i.test(s.c)) { S.frameColor = s.c; S.framePattern = s.p; } } catch { }
+const frameUI = () => {
+  document.querySelectorAll('#swatches button').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === S.frameColor.toLowerCase()));
+  document.querySelectorAll('#patterns button').forEach(b => b.classList.toggle('on', b.dataset.p === S.framePattern));
+  $('customcol').value = S.frameColor;
+  try { localStorage.setItem('hum-frame', JSON.stringify({ c: S.frameColor, p: S.framePattern })); } catch { }
+  if (S.grid) S.cover = makeCover();
+};
+$('swatches').onclick = e => { const b = e.target.closest('button'); if (b) { S.frameColor = b.dataset.c; frameUI(); } };
+$('customcol').oninput = e => { S.frameColor = e.target.value; frameUI(); };
+$('patterns').onclick = e => { const b = e.target.closest('button'); if (b) { S.framePattern = b.dataset.p; frameUI(); } };
+frameUI();
 $('showchord').onchange = e => S.showChord = e.target.checked;
 document.addEventListener('keydown', e => { if (e.code === 'Space' && document.body.dataset.state === 'ready' && !/INPUT|SELECT|BUTTON/.test(e.target.tagName)) { e.preventDefault(); S.playing ? stop() : play(); } });
 document.fonts.load('500 30px Poppins');
