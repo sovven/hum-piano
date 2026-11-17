@@ -193,7 +193,7 @@ function makeCover() {
   const c = o.getContext('2d');
   paintFrame(c, W, MH);
   const vid = !!S.video;
-  const px = vid ? S.vr.m : 40, py = vid ? S.vr.m : 40, pw = W - 2 * px, ph = MH - 2 * py;
+  const fm = S.frameW ? S.frameW + 16 : 0, px = vid ? S.vr.m : fm, py = vid ? S.vr.m : fm, pw = W - 2 * px, ph = MH - 2 * py;
   if (vid) return { canvas: o, px, py, pw, ph };
   c.fillStyle = '#FFFFFB'; c.fillRect(px, py, pw, ph);
   c.setLineDash([7, 7]); c.strokeStyle = '#E9E2C8'; c.lineWidth = 2; c.beginPath(); c.rect(px + 16, py + 16, pw - 32, ph - 32); c.stroke(); c.setLineDash([]);
@@ -428,13 +428,14 @@ document.querySelector('.mini').onclick = e => {
   document.querySelectorAll('.mini button').forEach(x => x.classList.toggle('on', x === b));
   S.tempoF = +b.dataset.f; rethink();
 };
-try { const s = JSON.parse(localStorage.getItem('hum-frame')); if (s && /^#[0-9a-f]{6}$/i.test(s.c)) { S.frameColor = s.c; S.framePattern = s.p; if ([24, 46, 76].includes(s.w)) S.frameW = s.w; } } catch { }
+try { const s = JSON.parse(localStorage.getItem('hum-frame')); if (s && /^#[0-9a-f]{6}$/i.test(s.c)) { S.frameColor = s.c; S.framePattern = s.p; if ([0, 24, 46, 76, 110].includes(s.w)) S.frameW = s.w; } } catch { }
 const frameUI = () => {
   document.querySelectorAll('#swatches button').forEach(b => b.classList.toggle('on', b.dataset.c.toLowerCase() === S.frameColor.toLowerCase()));
   document.querySelectorAll('#patterns button').forEach(b => b.classList.toggle('on', b.dataset.p === S.framePattern));
   $('customcol').value = S.frameColor;
   try { localStorage.setItem('hum-frame', JSON.stringify({ c: S.frameColor, p: S.framePattern, w: S.frameW })); } catch { }
   document.querySelectorAll('#framew button').forEach(b => b.classList.toggle('on', +b.dataset.w === S.frameW));
+  for (const id of ['swatches', 'patterns']) { $(id).style.opacity = S.frameW ? '' : '.35'; $(id).style.pointerEvents = S.frameW ? '' : 'none'; }
   if (S.grid) setupCanvas();
 };
 $('framew').onclick = e => { const b = e.target.closest('button'); if (b) { S.frameW = +b.dataset.w; frameUI(); } };
