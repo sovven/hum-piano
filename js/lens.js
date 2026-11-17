@@ -1,6 +1,6 @@
 export const FILTERS = [
   { id: 'none', name: '原相机', sw: 'linear-gradient(135deg,#d9d4cc,#9fa6ad)', p: {} },
-  { id: 'glow', name: '微曝', sw: 'linear-gradient(135deg,#ffffff,#f1ece6)', p: { expo: .3, shadows: .25, highlights: -.25, contrast: .04, vib: .08, glow: .7 } },
+  { id: 'glow', name: '微曝', sw: 'linear-gradient(135deg,#ffffff,#f1ece6)', p: { expo: .3785, contrast: .05, sat: -.2, hard: 1, blur: .12 } },
   { id: 'clear', name: '清透', sw: 'linear-gradient(135deg,#f4fbff,#cfe3f3)', p: { expo: .12, shadows: .5, highlights: -.1, contrast: .1, vib: .22, temp: -.035 } },
   { id: 'pale', name: '冷白皮', sw: 'linear-gradient(135deg,#fbf6fb,#dcd9ee)', p: { expo: .2, shadows: .45, highlights: -.15, contrast: .05, sat: -.06, vib: .1, temp: -.075, tint: .03, glow: .25 } },
   { id: 'cream', name: '奶油肌', sw: 'linear-gradient(135deg,#fff6ea,#f0d9c4)', p: { expo: .2, shadows: .4, highlights: -.3, contrast: -.06, sat: -.1, temp: .02, tint: .012, glow: .35 } },
@@ -14,7 +14,7 @@ const VS = `attribute vec2 a;varying vec2 v;void main(){v=vec2(.5-a.x*.5,a.y*.5+
 const FS = `precision highp float;
 varying vec2 v;uniform sampler2D tex;uniform vec2 px;uniform float aspect,time;
 uniform vec2 fc;uniform vec2 fp[6];uniform float fr,slim,smooth_,soft;
-uniform float expo,contrast,sat,vib,temp,tint,shadows,highlights,glow,grain,vig,sr,sg,sb,hr,hg,hb;uniform int deco;
+uniform float expo,contrast,sat,vib,temp,tint,shadows,highlights,glow,grain,vig,sr,sg,sb,hr,hg,hb,hard,blur;uniform int deco;
 float hash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
 float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
 void main(){
@@ -34,7 +34,7 @@ void main(){
   float cb=-.169*col.r-.331*col.g+.5*col.b,cr=.5*col.r-.419*col.g-.081*col.b;
   float skin=smoothstep(.0,.035,cr)*(1.-smoothstep(.14,.2,cr))*(1.-smoothstep(-.02,.02,cb))*smoothstep(-.22,-.16,cb);
   col=mix(col,bs,smooth_*(.35+.65*skin));col+=skin*smooth_*.03;
-  col=mix(col,pb,soft*.8);
+  col=mix(col,pb,min(1.,soft*.8+blur));
   col*=vec3(1.+temp,1.-tint,1.-temp);
   col*=pow(2.,expo);
   float l=luma(col);
@@ -47,7 +47,7 @@ void main(){
   col+=vec3(sr,sg,sb)*(1.-lc)*(1.-lc)*3.+vec3(hr,hg,hb)*lc*lc*3.;
   float wl=luma(wide)*pow(2.,expo);
   col+=wide*pow(clamp((wl-.5)/.5,0.,1.),1.6)*(glow*.42+soft*.12);
-  vec3 t=max(col-.8,0.)/.2;col=min(col,.8)+.2*t/(1.+t);
+  vec3 t=max(col-.8,0.)/.2;col=mix(min(col,.8)+.2*t/(1.+t),clamp(col,0.,1.),hard);
   col*=1.-vig*smoothstep(.35,.95,length(v-.5)*1.25);
   float g=grain+soft*.1;
   if(g>0.){
@@ -92,11 +92,11 @@ export function createLens(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   const loc = {}, U = n => loc[n] ??= gl.getUniformLocation(pr, n);
-  const GRADE = ['expo', 'contrast', 'sat', 'vib', 'temp', 'tint', 'shadows', 'highlights', 'glow', 'grain', 'vig', 'sr', 'sg', 'sb', 'hr', 'hg', 'hb'];
+  const GRADE = ['expo', 'contrast', 'sat', 'vib', 'temp', 'tint', 'shadows', 'highlights', 'glow', 'grain', 'vig', 'sr', 'sg', 'sb', 'hr', 'hg', 'hb', 'hard', 'blur'];
   const cur = Object.fromEntries(GRADE.map(k => [k, 0]));
-  let face = null;
+  let face = null, held = null, amt = 0;
   return {
-    setFace(f) { face = f; },
+    setFace(f) { face = f; if (f) held = f; },
     render(video, o, time) {
       const w = video.videoWidth, h = video.videoHeight;
       if (!w) return;
@@ -107,9 +107,10 @@ export function createLens(canvas) {
       for (const k of GRADE) { cur[k] += ((target[k] || 0) - cur[k]) * .18; gl.uniform1f(U(k), cur[k] + (k === 'expo' ? o.expo || 0 : 0)); }
       gl.uniform2f(U('px'), 1 / w, 1 / h); gl.uniform1f(U('aspect'), w / h); gl.uniform1f(U('time'), time % 1000);
       gl.uniform1f(U('smooth_'), o.smooth); gl.uniform1f(U('soft'), o.soft || 0); gl.uniform1i(U('deco'), o.deco);
-      if (face && o.slim > 0) {
-        gl.uniform1f(U('slim'), o.slim * .045); gl.uniform2f(U('fc'), face.c[0], face.c[1]); gl.uniform1f(U('fr'), face.r);
-        gl.uniform2fv(U('fp[0]'), new Float32Array(face.p));
+      amt += ((face && o.slim > 0 ? o.slim : 0) - amt) * (face ? .25 : .08);
+      if (held && amt > 0.004) {
+        gl.uniform1f(U('slim'), amt * .045); gl.uniform2f(U('fc'), held.c[0], held.c[1]); gl.uniform1f(U('fr'), held.r);
+        gl.uniform2fv(U('fp[0]'), new Float32Array(held.p));
       } else gl.uniform1f(U('slim'), 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
@@ -117,23 +118,40 @@ export function createLens(canvas) {
 }
 
 const JAW = [132, 172, 150, 361, 397, 379];
-let fl = null, flP = null, last = null;
+let fl = null, flP = null, last = null, lastSeen = 0, vel = null;
+export const faceStat = { seen: 0, held: 0, lost: 0 };
+const HOLD = 900;
 export function loadFace() {
   return flP ||= (async () => {
-    const m = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
-    const fs = await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-    const mk = delegate => m.FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: new URL('../vendor/face_landmarker.task', import.meta.url).href, delegate }, runningMode: 'VIDEO', numFaces: 1 });
+    const base = new URL('../vendor/mp/', import.meta.url).href;
+    const m = await import(base + 'vision_bundle.js');
+    const fs = await m.FilesetResolver.forVisionTasks(base + 'wasm');
+    const mk = delegate => m.FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: new URL('../vendor/face_landmarker.task', import.meta.url).href, delegate }, runningMode: 'VIDEO', numFaces: 1, minFaceDetectionConfidence: .3, minFacePresenceConfidence: .3, minTrackingConfidence: .3 });
     try { fl = await mk('GPU'); } catch { fl = await mk('CPU'); }
     return true;
   })().catch(e => { flP = null; throw e; });
 }
 export function trackFace(video, ts) {
   if (!fl || !video.videoWidth) return null;
-  let res; try { res = fl.detectForVideo(video, ts); } catch { return last; }
-  const lm = res.faceLandmarks && res.faceLandmarks[0];
-  if (!lm) { last = null; return null; }
+  let res = null; try { res = fl.detectForVideo(video, ts); } catch { }
+  const lm = res && res.faceLandmarks && res.faceLandmarks[0];
+  if (!lm) {
+    if (last && ts - lastSeen < HOLD) {
+      if (vel) { const d = Math.max(0, 1 - (ts - lastSeen) / 250); last = { c: last.c.map((x, i) => x + vel.c[i] * d), p: last.p.map((x, i) => x + vel.p[i % 2] * d), r: last.r }; }
+      faceStat.held++; return last;
+    }
+    faceStat.lost++; last = null; vel = null; return null;
+  }
+  faceStat.seen++;
   const asp = video.videoWidth / video.videoHeight, P = i => [lm[i].x, 1 - lm[i].y];
   const f = { c: P(2), p: JAW.flatMap(P), r: Math.hypot((lm[234].x - lm[454].x) * asp, lm[234].y - lm[454].y) * .42 };
-  if (last) { const k = .55; f.c = f.c.map((x, i) => last.c[i] + (x - last.c[i]) * k); f.p = f.p.map((x, i) => last.p[i] + (x - last.p[i]) * k); f.r = last.r + (f.r - last.r) * k; }
+  if (last) {
+    const move = Math.hypot(f.c[0] - last.c[0], f.c[1] - last.c[1]) / (f.r || 1);
+    const k = Math.min(1, .45 + move * 6);
+    const c = f.c.map((x, i) => last.c[i] + (x - last.c[i]) * k);
+    vel = { c: [(c[0] - last.c[0]) * .5, (c[1] - last.c[1]) * .5], p: [(c[0] - last.c[0]) * .5, (c[1] - last.c[1]) * .5] };
+    f.c = c; f.p = f.p.map((x, i) => last.p[i] + (x - last.p[i]) * k); f.r = last.r + (f.r - last.r) * Math.min(1, k);
+  }
+  lastSeen = ts;
   return last = f;
 }

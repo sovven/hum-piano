@@ -1,7 +1,7 @@
 import { resampleMono, trackPitch, segmentNotes, singingStats, onsetEnvelope, trackBeats } from './analyze.js';
 import { estimateTuning, estimateKey, keyName, buildGrid, chooseChords, chordVocab, arrange, PC } from './harmony.js';
 import { renderPiano, wavBlob, demoVoice } from './piano.js';
-import { createLens, loadFace, trackFace, FILTERS, DECOS } from './lens.js';
+import { createLens, loadFace, trackFace, faceStat, FILTERS, DECOS } from './lens.js';
 
 const $ = id => document.getElementById(id);
 const S = {
@@ -11,7 +11,7 @@ const S = {
   frameColor: '#FFF3B5', framePattern: 'dots', frameW: 24, playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
 };
 
-if (location.search.includes('debug')) window.__hum = S;
+if (location.search.includes('debug')) { window.__hum = S; window.__face = faceStat; }
 
 const setState = s => { document.body.dataset.state = s; };
 const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
@@ -394,6 +394,7 @@ $('lenstabs').onclick = e => {
   document.querySelectorAll('.lenspane').forEach(p => p.hidden = p.dataset.t !== b.dataset.t);
 };
 lensUI();
+if (!navigator.connection?.saveData) setTimeout(() => { const t0 = performance.now(); loadFace().then(() => { if (window.__face) window.__face.loadMs = Math.round(performance.now() - t0); }).catch(() => { }); }, 1200);
 const nativeCam = () => { const i = $('file'); i.setAttribute('capture', 'user'); i.accept = 'video/*'; i.click(); setTimeout(() => { i.removeAttribute('capture'); i.accept = 'video/*,audio/*'; }, 1000); };
 const isPhone = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 async function openCapture(cam) {
