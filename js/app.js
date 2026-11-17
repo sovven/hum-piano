@@ -7,7 +7,7 @@ const $ = id => document.getElementById(id);
 const S = {
   ctx: null, vocalBuf: null, pianoBuf: null, video: null, dur: 0,
   pitch: null, notes: [], onset: null, events: [], grid: null, plan: null, key: null, keys: [], tune: null, bt: null,
-  style: 'ballad', keyForce: null, tempoF: 1, meter: 4, showChord: true,
+  style: 'ballad', rich: true, keyForce: null, tempoF: 1, meter: 4, showChord: true,
   frameColor: '#FFF3B5', framePattern: 'dots', frameW: 24, playing: false, offset: 0, startAt: 0, srcs: [], exporting: false, cover: null
 };
 
@@ -94,7 +94,7 @@ function harmonize() {
 }
 
 async function synth(first) {
-  S.events = arrange(S.grid, S.plan, S.key, S.style, S.dur, S.notes);
+  S.events = arrange(S.grid, S.plan, S.key, S.style, S.dur, S.notes, S.rich);
   S.pianoBuf = await renderPiano(S.events, S.dur, S.tune.at, 44100, p => first && work('钢琴在弹了…', .7 + p * .28));
   if (S.playing) startSources(now());
 }
@@ -268,7 +268,7 @@ function draw() {
     if (a) { g.globalAlpha = a; g.fillStyle = '#5F87D9'; g.beginPath(); g.roundRect(x, y0, bw, bh, [0, 0, 3, 3]); g.fill(); g.globalAlpha = 1; }
   });
   g.fillStyle = '#F6C3CF'; g.fillRect(0, y0, W, Math.max(3, KH * 0.035));
-  const si = curSeg(t), ch = si >= 0 && S.grid.segs[si].chord >= 0 ? S.plan.vocab[S.grid.segs[si].chord].name : '';
+  const si = curSeg(t), ch = si >= 0 && S.grid.segs[si].chord >= 0 ? (S.grid.segs[si].label || S.plan.vocab[S.grid.segs[si].chord].name) : '';
   if (S.showChord && ch) {
     const fs = Math.round(W * 0.05);
     g.font = `500 ${Math.round(fs * 0.8)}px Poppins, sans-serif`;
@@ -302,8 +302,8 @@ function renderChords() {
   for (let i = first; i <= last; i++) {
     if (segs[i].barStart && i > first) { const s = document.createElement('span'); s.className = 'bar-sep'; box.appendChild(s); }
     const b = document.createElement('button');
-    b.dataset.i = i; b.textContent = segs[i].chord < 0 ? '·' : vocab[segs[i].chord].name;
-    if (i > first && !segs[i].barStart && segs[i - 1].chord === segs[i].chord) b.classList.add('same');
+    b.dataset.i = i; b.textContent = segs[i].chord < 0 ? '·' : (segs[i].label || vocab[segs[i].chord].name);
+    if (i > first && !segs[i].barStart && segs[i - 1].chord === segs[i].chord && segs[i - 1].label === segs[i].label) b.classList.add('same');
     b.onclick = ev => openPop(ev.currentTarget, i);
     box.appendChild(b);
   }
@@ -533,6 +533,7 @@ for (const [id, gain] of [['vol-p', 'gP'], ['vol-v', 'gV']]) {
   el.oninput = () => { fill(el); audio(); S[gain].gain.value = el.value / 100 * (gain === 'gP' ? 1 : 1); };
 }
 const rethink = () => { harmonize(); renderUI(); resynth(); };
+$('colour').onclick = e => { const b = e.target.closest('button'); if (!b) return; S.rich = b.dataset.r === '1'; document.querySelectorAll('#colour button').forEach(x => x.classList.toggle('on', x === b)); resynth(); };
 $('keysel').onchange = e => { const v = e.target.value; if (!v) S.keyForce = null; else { const [t, m] = v.split('-'); S.keyForce = { tonic: +t, mode: m }; } rethink(); };
 $('meter').onchange = e => { S.meter = +e.target.value; rethink(); };
 document.querySelector('.mini').onclick = e => {
