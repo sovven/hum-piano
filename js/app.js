@@ -1,6 +1,7 @@
 import { resampleMono, trackPitch, segmentNotes, onsetEnvelope, trackBeats } from './analyze.js';
 import { estimateTuning, estimateKey, keyName, buildGrid, chooseChords, chordVocab, arrange, PC } from './harmony.js';
 import { renderPiano, wavBlob, demoVoice } from './piano.js';
+import { createLens, loadFace, trackFace, FILTERS, DECOS } from './lens.js';
 
 const $ = id => document.getElementById(id);
 const S = {
@@ -348,27 +349,87 @@ function exportVideo() {
   setTimeout(play, 150);
 }
 
-let cap = null;
+let cap = null, lens = null, lensTried = false;
+const L = { filter: 'none', slim: 0, smooth: 0, deco: 0, expo: 0 };
+const clamp100 = x => Math.min(100, Math.max(0, +x || 0));
+try { const s = JSON.parse(localStorage.getItem('hum-lens')); if (s && FILTERS.some(f => f.id === s.filter)) Object.assign(L, { filter: s.filter, slim: clamp100(s.slim), smooth: clamp100(s.smooth), deco: [0, 1, 2].includes(s.deco) ? s.deco : 0, expo: Math.min(100, Math.max(-100, +s.expo || 0)) }); } catch { }
+const HINT = '准备好就按下去，唱完再按一次 · 戴耳机或安静一点效果最好';
+function needFace() {
+  $('caphint').textContent = '正在准备瘦脸…';
+  loadFace().then(() => { $('caphint').textContent = HINT; })
+    .catch(e => { console.warn(e); $('caphint').textContent = HINT; toast('瘦脸没加载出来，检查一下网络再拖一次滑块', 4200); });
+}
+$('filters').innerHTML = FILTERS.map(f => `<button class="chip" data-f="${f.id}" style="--sw:${f.sw}"><i></i>${f.name}</button>`).join('');
+$('decos').innerHTML = DECOS.map(d => `<button data-d="${d.id}">${d.name}</button>`).join('');
+const lensUI = () => {
+  document.querySelectorAll('#filters .chip').forEach(b => b.classList.toggle('on', b.dataset.f === L.filter));
+  document.querySelectorAll('#decos button').forEach(b => b.classList.toggle('on', +b.dataset.d === L.deco));
+  for (const k of ['slim', 'smooth']) { $(k).value = L[k]; fill($(k)); $(k + '-v').textContent = L[k]; }
+  const ex = $('expo'), h = (L.expo + 100) / 2; ex.value = L.expo; ex.style.setProperty('--a', Math.min(50, h) + '%'); ex.style.setProperty('--b', Math.max(50, h) + '%');
+  $('expo-v').textContent = (L.expo > 0 ? '+' : '') + (L.expo / 100 * .7).toFixed(1); $('expo-reset').disabled = !L.expo;
+  try { localStorage.setItem('hum-lens', JSON.stringify(L)); } catch { }
+};
+$('filters').onclick = e => { const b = e.target.closest('.chip'); if (b) { L.filter = b.dataset.f; lensUI(); } };
+$('decos').onclick = e => { const b = e.target.closest('button'); if (b) { L.deco = +b.dataset.d; lensUI(); } };
+$('slim').oninput = e => { const was = L.slim; L.slim = +e.target.value; lensUI(); if (!was && L.slim) needFace(); };
+$('expo').oninput = e => { const v = +e.target.value; L.expo = Math.abs(v) < 6 ? 0 : v; lensUI(); };
+$('expo-reset').onclick = () => { L.expo = 0; lensUI(); };
+$('smooth').oninput = e => { L.smooth = +e.target.value; lensUI(); };
+$('lenstabs').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#lenstabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.lenspane').forEach(p => p.hidden = p.dataset.t !== b.dataset.t);
+};
+lensUI();
+const nativeCam = () => { const i = $('file'); i.setAttribute('capture', 'user'); i.accept = 'video/*'; i.click(); setTimeout(() => { i.removeAttribute('capture'); i.accept = 'video/*,audio/*'; }, 1000); };
+const isPhone = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
 async function openCapture(cam) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    if (cam && isPhone) return nativeCam();
+    return toast('这个浏览器不让网页直接用摄像头/麦克风，换 Chrome、Edge 或 Safari 打开，或者先录好再上传', 5200);
+  }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
+    const ctx = audio(), an = ctx.createAnalyser(); an.fftSize = 1024;
+    let stream;
+    if (cam && window.__fakeCam) {
+      const v = document.createElement('video'); v.src = window.__fakeCam; v.loop = true; v.muted = true; await v.play();
+      stream = v.captureStream();
+      if (!stream.getAudioTracks().length) stream.addTrack(ctx.createMediaStreamDestination().stream.getAudioTracks()[0]);
+    } else stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       video: cam ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
     });
     cap = { stream, cam, rec: null, t0: 0 };
-    $('capbox').classList.toggle('cam', cam);
-    if (cam) { $('camv').srcObject = stream; $('camv').play(); }
-    const ctx = audio(), an = ctx.createAnalyser(); an.fftSize = 1024;
+    $('capbox').classList.toggle('cam', cam); $('v-capture').classList.toggle('cam', cam);
+    $('capbox').style.aspectRatio = '';
+    if (cam) {
+      const v = $('camv');
+      v.onloadedmetadata = () => { if (v.videoWidth) $('capbox').style.aspectRatio = v.videoWidth + ' / ' + v.videoHeight; };
+      v.srcObject = stream; v.play();
+      if (!lensTried) { lensTried = true; try { lens = createLens($('camgl')); } catch (e) { console.warn(e); } }
+      $('capbox').classList.toggle('gl', !!lens); $('lens').style.display = lens ? '' : 'none';
+      if (lens && L.slim > 0) needFace();
+    }
     cap.node = ctx.createMediaStreamSource(stream); cap.node.connect(an); cap.an = an;
     $('caphint').textContent = '准备好就按下去，唱完再按一次 · 戴耳机或安静一点效果最好';
     setState('capture'); capLoop();
-  } catch (e) { toast(cam ? '没拿到摄像头/麦克风权限，可以改用上传' : '没拿到麦克风权限，可以改用上传', 4000); }
+  } catch (e) {
+    const dev = cam ? '摄像头和麦克风' : '麦克风';
+    if (cam && isPhone && e.name !== 'NotFoundError') { try { nativeCam(); } catch { } }
+    toast(e.name === 'NotAllowedError' ? `浏览器把${dev}拦住了：点地址栏左边的图标，把${dev}改成"允许"，再刷新页面`
+      : e.name === 'NotFoundError' ? `没找到${dev}，检查一下设备有没有接好，或者先录好再上传`
+      : e.name === 'NotReadableError' ? `${dev}正被别的软件占着（比如会议、直播软件），关掉它再试`
+      : `${dev}打不开（${e.name}），可以先录好再上传`, 6000);
+  }
 }
 function capLoop() {
   if (!cap) return;
   requestAnimationFrame(capLoop);
   if (cap.rec) $('timer').textContent = fmt((performance.now() - cap.t0) / 1000);
-  if (cap.cam) return;
+  if (cap.cam) {
+    if (lens) { lens.setFace(L.slim > 0 ? trackFace($('camv'), performance.now()) : null); lens.render($('camv'), { filter: L.filter, deco: L.deco, slim: L.slim / 100, smooth: L.smooth / 100, expo: L.expo / 100 * .7 }, performance.now() / 1000); }
+    return;
+  }
   const c = $('micwave'), x = c.getContext('2d'), d = new Uint8Array(512);
   cap.an.getByteTimeDomainData(d);
   x.clearRect(0, 0, 600, 120); x.strokeStyle = '#8DB3F2'; x.lineWidth = 3; x.lineCap = 'round'; x.beginPath();
@@ -384,7 +445,8 @@ function toggleRec() {
   if (!cap) return;
   if (cap.rec) { cap.rec.stop(); return; }
   const mime = (cap.cam ? ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm'] : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']).find(m => MediaRecorder.isTypeSupported(m));
-  const rec = new MediaRecorder(cap.stream, { mimeType: mime, videoBitsPerSecond: 6e6, audioBitsPerSecond: 192000 });
+  const out = cap.cam && lens ? new MediaStream([...$('camgl').captureStream(30).getVideoTracks(), ...cap.stream.getAudioTracks()]) : cap.stream;
+  const rec = new MediaRecorder(out, { mimeType: mime, videoBitsPerSecond: 6e6, audioBitsPerSecond: 192000 });
   const chunks = [], cam = cap.cam;
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   rec.onstop = () => { closeCapture(); load(new Blob(chunks, { type: mime }), cam); };

@@ -36,8 +36,27 @@
     <div class="view" id="v-capture">
       <div class="capbox" id="capbox">
         <video id="camv" playsinline muted></video>
+        <canvas id="camgl"></canvas>
         <div class="micviz" id="micviz"><span class="daisy big"></span><canvas id="micwave" width="600" height="120"></canvas></div>
         <div class="timer" id="timer">0:00</div>
+      </div>
+      <div class="lens" id="lens">
+        <div class="lenspane" data-t="filter"><div class="chips" id="filters"></div></div>
+        <div class="lenspane" data-t="beauty" hidden>
+          <label class="islider"><span>瘦脸</span><input type="range" id="slim" min="0" max="100" value="0"><b id="slim-v">0</b></label>
+          <label class="islider"><span>磨皮</span><input type="range" id="smooth" min="0" max="100" value="0"><b id="smooth-v">0</b></label>
+        </div>
+        <div class="lenspane" data-t="expo" hidden>
+          <label class="islider bi"><span>曝光</span><input type="range" id="expo" min="-100" max="100" value="0"><b id="expo-v">0</b></label>
+          <button class="ireset" id="expo-reset">复位</button>
+        </div>
+        <div class="lenspane" data-t="deco" hidden><div class="iseg" id="decos"></div></div>
+        <div class="iseg" id="lenstabs">
+          <button data-t="filter" class="on">滤镜</button>
+          <button data-t="expo">曝光</button>
+          <button data-t="beauty">美颜</button>
+          <button data-t="deco">装饰</button>
+        </div>
       </div>
       <p class="hint" id="caphint">准备好就按下去，唱完再按一次</p>
       <div class="row">
