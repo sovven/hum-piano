@@ -1,4 +1,4 @@
-import { resampleMono, trackPitch, segmentNotes, onsetEnvelope, trackBeats } from './analyze.js';
+import { resampleMono, trackPitch, segmentNotes, singingStats, onsetEnvelope, trackBeats } from './analyze.js';
 import { estimateTuning, estimateKey, keyName, buildGrid, chooseChords, chordVocab, arrange, PC } from './harmony.js';
 import { renderPiano, wavBlob, demoVoice } from './piano.js';
 import { createLens, loadFace, trackFace, FILTERS, DECOS } from './lens.js';
@@ -33,6 +33,7 @@ function audio() {
 
 async function load(blob, isVideo) {
   stop();
+  S.lastFile = null; S.lastUrl = null; $('b-share').hidden = true; $('b-qr').hidden = true; $('qrpanel').hidden = true;
   setState('work'); work('正在听你的声音…', .03);
   const ctx = audio();
   try {
@@ -51,7 +52,10 @@ async function load(blob, isVideo) {
     const x = await resampleMono(buf, 16000);
     S.pitch = await trackPitch(x, 16000, p => work('正在听你的音高…', .05 + p * .55));
     S.notes = segmentNotes(S.pitch);
-    if (S.notes.length < 2) throw new Error('nopitch');
+    const st = singingStats(S.notes, buf.duration);
+    S.sing = st;
+    const sustained = st.long >= 1.2 && st.long / st.sung >= 0.25, inTune = st.grid >= 0.55 && st.sung >= 1;
+    if (S.notes.length < 3 || !(sustained || inTune)) throw new Error(S.notes.candidates > 8 ? 'nosing' : 'nopitch');
     work('在找节拍…', .64);
     await new Promise(r => setTimeout(r, 30));
     S.onset = onsetEnvelope(x, 16000);
@@ -67,7 +71,7 @@ async function load(blob, isVideo) {
   } catch (e) {
     console.error(e);
     setState('empty');
-    toast(e.message === 'short' ? '这段太短啦，至少唱两三秒' : e.message === 'nopitch' ? '没听到清楚的人声，换一段安静点的试试' : '这个文件读不出声音，换个格式试试（mp4 / mov / mp3 / wav）', 4200);
+    toast(e.message === 'short' ? '这段太短啦，至少唱两三秒' : e.message === 'nosing' ? '只听到说话声或杂音，没听到唱歌 —— 离麦克风近一点、把音唱出来再试' : e.message === 'nopitch' ? '没听到清楚的人声，换一段安静点的试试' : '这个文件读不出声音，换个格式试试（mp4 / mov / mp3 / wav）', 4200);
   }
 }
 
@@ -298,7 +302,7 @@ function renderChords() {
   for (let i = first; i <= last; i++) {
     if (segs[i].barStart && i > first) { const s = document.createElement('span'); s.className = 'bar-sep'; box.appendChild(s); }
     const b = document.createElement('button');
-    b.dataset.i = i; b.textContent = vocab[segs[i].chord].name;
+    b.dataset.i = i; b.textContent = segs[i].chord < 0 ? '·' : vocab[segs[i].chord].name;
     if (i > first && !segs[i].barStart && segs[i - 1].chord === segs[i].chord) b.classList.add('same');
     b.onclick = ev => openPop(ev.currentTarget, i);
     box.appendChild(b);
@@ -339,7 +343,11 @@ function exportVideo() {
   rec.onstop = () => {
     S.master.disconnect(dest); S.exporting = false; S.rec = null;
     $('b-export').disabled = false; $('b-export').lastChild.textContent = '保存视频';
-    save(new Blob(chunks, { type: mime }), `hum-keys.${mime.includes('mp4') ? 'mp4' : 'webm'}`);
+    const name = `hum-keys.${mime.includes('mp4') ? 'mp4' : 'webm'}`, blob = new Blob(chunks, { type: mime });
+    save(blob, name);
+    S.lastFile = new File([blob], name, { type: mime.split(';')[0] });
+    let can = false; try { can = !!navigator.canShare && navigator.canShare({ files: [S.lastFile] }); } catch { }
+    $('b-share').hidden = !can; $('b-qr').hidden = false; S.lastUrl = null; $('qrpanel').hidden = true;
     toast('存好啦，去发吧 ♡');
   };
   S.rec = rec; S.exporting = true;
@@ -350,9 +358,9 @@ function exportVideo() {
 }
 
 let cap = null, lens = null, lensTried = false;
-const L = { filter: 'none', slim: 0, smooth: 0, deco: 0, expo: 0 };
+const L = { filter: 'none', slim: 0, smooth: 0, deco: 0, expo: 0, soft: 0 };
 const clamp100 = x => Math.min(100, Math.max(0, +x || 0));
-try { const s = JSON.parse(localStorage.getItem('hum-lens')); if (s && FILTERS.some(f => f.id === s.filter)) Object.assign(L, { filter: s.filter, slim: clamp100(s.slim), smooth: clamp100(s.smooth), deco: [0, 1, 2].includes(s.deco) ? s.deco : 0, expo: Math.min(100, Math.max(-100, +s.expo || 0)) }); } catch { }
+try { const s = JSON.parse(localStorage.getItem('hum-lens')); if (s && FILTERS.some(f => f.id === s.filter)) Object.assign(L, { filter: s.filter, slim: clamp100(s.slim), smooth: clamp100(s.smooth), deco: [0, 1, 2].includes(s.deco) ? s.deco : 0, expo: Math.min(100, Math.max(-100, +s.expo || 0)), soft: clamp100(s.soft) }); } catch { }
 const HINT = '准备好就按下去，唱完再按一次 · 戴耳机或安静一点效果最好';
 function needFace() {
   $('caphint').textContent = '正在准备瘦脸…';
@@ -364,16 +372,21 @@ $('decos').innerHTML = DECOS.map(d => `<button data-d="${d.id}">${d.name}</butto
 const lensUI = () => {
   document.querySelectorAll('#filters .chip').forEach(b => b.classList.toggle('on', b.dataset.f === L.filter));
   document.querySelectorAll('#decos button').forEach(b => b.classList.toggle('on', +b.dataset.d === L.deco));
-  for (const k of ['slim', 'smooth']) { $(k).value = L[k]; fill($(k)); $(k + '-v').textContent = L[k]; }
+  for (const k of ['slim', 'smooth', 'soft']) { $(k).value = L[k]; fill($(k)); $(k + '-v').textContent = L[k]; }
   const ex = $('expo'), h = (L.expo + 100) / 2; ex.value = L.expo; ex.style.setProperty('--a', Math.min(50, h) + '%'); ex.style.setProperty('--b', Math.max(50, h) + '%');
-  $('expo-v').textContent = (L.expo > 0 ? '+' : '') + (L.expo / 100 * .7).toFixed(1); $('expo-reset').disabled = !L.expo;
+  $('expo-v').textContent = (L.expo > 0 ? '+' : '') + (L.expo / 100 * .7).toFixed(1);
   try { localStorage.setItem('hum-lens', JSON.stringify(L)); } catch { }
 };
 $('filters').onclick = e => { const b = e.target.closest('.chip'); if (b) { L.filter = b.dataset.f; lensUI(); } };
 $('decos').onclick = e => { const b = e.target.closest('button'); if (b) { L.deco = +b.dataset.d; lensUI(); } };
 $('slim').oninput = e => { const was = L.slim; L.slim = +e.target.value; lensUI(); if (!was && L.slim) needFace(); };
 $('expo').oninput = e => { const v = +e.target.value; L.expo = Math.abs(v) < 6 ? 0 : v; lensUI(); };
-$('expo-reset').onclick = () => { L.expo = 0; lensUI(); };
+$('soft').oninput = e => { L.soft = +e.target.value; lensUI(); };
+$('b-camtoggle').onclick = async () => {
+  if (!cap || cap.rec) return;
+  const want = !cap.cam; closeCapture(); await openCapture(want);
+  if (!cap) setState('empty');
+};
 $('smooth').oninput = e => { L.smooth = +e.target.value; lensUI(); };
 $('lenstabs').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -408,7 +421,7 @@ async function openCapture(cam) {
       v.srcObject = stream; v.play();
       if (!lensTried) { lensTried = true; try { lens = createLens($('camgl')); } catch (e) { console.warn(e); } }
       $('capbox').classList.toggle('gl', !!lens); $('lens').style.display = lens ? '' : 'none';
-      if (lens && L.slim > 0) needFace();
+      if (lens) { if (L.slim > 0) needFace(); else loadFace().catch(() => { }); }
     }
     cap.node = ctx.createMediaStreamSource(stream); cap.node.connect(an); cap.an = an;
     $('caphint').textContent = '准备好就按下去，唱完再按一次 · 戴耳机或安静一点效果最好';
@@ -427,7 +440,7 @@ function capLoop() {
   requestAnimationFrame(capLoop);
   if (cap.rec) $('timer').textContent = fmt((performance.now() - cap.t0) / 1000);
   if (cap.cam) {
-    if (lens) { lens.setFace(L.slim > 0 ? trackFace($('camv'), performance.now()) : null); lens.render($('camv'), { filter: L.filter, deco: L.deco, slim: L.slim / 100, smooth: L.smooth / 100, expo: L.expo / 100 * .7 }, performance.now() / 1000); }
+    if (lens) { lens.setFace(L.slim > 0 ? trackFace($('camv'), performance.now()) : null); lens.render($('camv'), { filter: L.filter, deco: L.deco, slim: L.slim / 100, smooth: L.smooth / 100, expo: L.expo / 100 * .7, soft: L.soft / 100 }, performance.now() / 1000); }
     return;
   }
   const c = $('micwave'), x = c.getContext('2d'), d = new Uint8Array(512);
@@ -463,6 +476,43 @@ drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) l
 $('b-cam').onclick = () => openCapture(true);
 $('b-mic').onclick = () => openCapture(false);
 $('b-rec').onclick = toggleRec;
+async function uploadTemp(file) {
+  const a = new FormData(); a.append('reqtype', 'fileupload'); a.append('time', '1h'); a.append('fileToUpload', file, file.name);
+  try {
+    const r = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', { method: 'POST', body: a });
+    const t = (await r.text()).trim();
+    if (!r.ok || !/^https:\/\/\S+$/.test(t)) throw new Error('litterbox ' + r.status);
+    return t;
+  } catch (e) {
+    console.warn(e);
+    const b = new FormData(); b.append('file', file, file.name);
+    const r = await fetch('https://tmpfiles.org/api/v1/upload', { method: 'POST', body: b });
+    const u = (await r.json()).data.url;
+    if (!/^https?:\/\/tmpfiles\.org\//.test(u)) throw new Error('tmpfiles');
+    return u.replace(/^http:/, 'https:');
+  }
+}
+const qrStep = id => { for (const k of ['qr-up', 'qr-done']) $(k).hidden = k !== id; };
+async function showQR(url) {
+  if (!window.qrcode) await new Promise((res, rej) => { const el = document.createElement('script'); el.src = 'vendor/qrcode.js'; el.onload = res; el.onerror = rej; document.head.appendChild(el); });
+  const q = window.qrcode(0, 'M'); q.addData(url); q.make();
+  $('qr-img').innerHTML = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+  qrStep('qr-done');
+}
+$('b-qr').onclick = async () => {
+  const file = S.lastFile; if (!file || S.qrBusy) return;
+  $('qrpanel').hidden = false;
+  $('qrpanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (S.lastUrl) return showQR(S.lastUrl);
+  qrStep('qr-up'); S.qrBusy = true;
+  try {
+    const url = await uploadTemp(file);
+    if (S.lastFile === file) { S.lastUrl = url; await showQR(url); }
+  } catch (e) { console.warn(e); $('qrpanel').hidden = true; toast('二维码没生成出来，检查一下网络再点一次', 4200); }
+  S.qrBusy = false;
+};
+$('qr-copy').onclick = async () => { try { await navigator.clipboard.writeText(S.lastUrl); toast('链接复制好了'); } catch { prompt('复制这个链接', S.lastUrl); } };
+$('b-share').onclick = () => { if (S.lastFile) navigator.share({ files: [S.lastFile], title: 'hum & keys' }).catch(() => { }); };
 $('b-capback').onclick = () => { if (cap && cap.rec) { cap.rec.onstop = null; cap.rec.stop(); } closeCapture(); setState('empty'); };
 $('b-demo').onclick = () => load(demoVoice(audio()), false);
 $('b-play').onclick = () => S.playing ? stop() : play();

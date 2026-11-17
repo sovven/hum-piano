@@ -12,7 +12,7 @@ export async function resampleMono(audioBuffer, sr = 16000) {
 
 export async function trackPitch(x, sr, onProgress) {
   const hop = 160, W = 512;
-  const tauMin = Math.floor(sr / 900), tauMax = Math.ceil(sr / 75);
+  const tauMin = Math.floor(sr / 1100), tauMax = Math.ceil(sr / 75);
   const n = Math.max(0, Math.floor((x.length - W - tauMax) / hop));
   const midi = new Float32Array(n), cm = new Float32Array(n), rms = new Float32Array(n);
   const d = new Float32Array(tauMax + 2);
@@ -69,46 +69,56 @@ export async function trackPitch(x, sr, onProgress) {
   return { midi: sm, voiced, rms, n, t0, dt };
 }
 
-export function segmentNotes(pt) {
-  const { midi, voiced, n, t0, dt } = pt;
-  const notes = [];
-  let cur = null, away = 0, gap = 0;
-  const close = () => {
-    if (!cur) return;
-    const len = cur.ps.length;
-    if (len * dt >= 0.07) {
-      const cut = cur.ps.slice(Math.floor(len * 0.2), Math.max(Math.floor(len * 0.2) + 1, Math.ceil(len * 0.95)));
-      cut.sort((a, b) => a - b);
-      notes.push({ t0: t0 + cur.i0 * dt, t1: t0 + (cur.i0 + len) * dt, p: cut[cut.length >> 1] });
-    }
-    cur = null;
+const median = a => { const b = Array.from(a).sort((x, y) => x - y); return b[b.length >> 1]; };
+
+export function segmentNotes(pt, opt = {}) {
+  const { midi, voiced, rms, n, t0, dt } = pt;
+  const minDur = opt.minDur ?? 0.1, maxDrift = opt.maxDrift ?? 0.7, maxDev = opt.maxDev ?? 0.45, relLevel = opt.relLevel ?? 0.18;
+  const cand = [];
+  const push = idx => {
+    const len = idx.length;
+    if (len < 3) return;
+    const ps = idx.map(i => midi[i]);
+    const cut = ps.slice(Math.floor(len * 0.15), Math.max(Math.floor(len * 0.15) + 1, Math.ceil(len * 0.95)));
+    const p = median(cut);
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, dev = 0;
+    for (let k = 0; k < cut.length; k++) { sx += k; sy += cut[k]; sxx += k * k; sxy += k * cut[k]; dev += Math.abs(cut[k] - p); }
+    const den = cut.length * sxx - sx * sx;
+    const drift = den > 0 ? (cut.length * sxy - sx * sy) / den * (cut.length - 1) : 0;
+    let lv = 0; for (const i of idx) lv += rms[i];
+    cand.push({ t0: t0 + idx[0] * dt, t1: t0 + (idx[len - 1] + 1) * dt, p, drift, dev: dev / cut.length, level: lv / len });
   };
-  for (let i = 0; i < n; i++) {
-    if (!voiced[i]) { gap++; if (gap > 5) close(); continue; }
-    gap = 0;
-    const p = midi[i];
-    if (!cur) { cur = { i0: i, ps: [p], sum: p }; away = 0; continue; }
-    const tail = cur.ps.slice(-12);
-    const mean = tail.reduce((a, b) => a + b, 0) / tail.length;
-    if (Math.abs(p - mean) > 0.75) {
-      away++;
-      if (away >= 4) {
-        const moved = cur.ps.splice(cur.ps.length - (away - 1), away - 1);
-        const start = i - (away - 1);
-        close();
-        cur = { i0: start, ps: [...moved, p] };
-        away = 0;
-        continue;
-      }
-    } else away = 0;
-    cur.ps.push(p);
+  let i = 0;
+  while (i < n) {
+    if (!voiced[i]) { i++; continue; }
+    const run = [];
+    let j = i, gap = 0;
+    while (j < n && gap <= 3) { if (voiced[j]) { run.push(j); gap = 0; } else gap++; j++; }
+    let s0 = 0;
+    for (let k = 4; k < run.length - 3; k++) {
+      if (k - s0 < 4) continue;
+      const back = median(run.slice(Math.max(s0, k - 15), k).map(q => midi[q]));
+      const fwd = median(run.slice(k, k + 10).map(q => midi[q]));
+      if (Math.abs(fwd - back) > 0.6 && Math.abs(midi[run[k]] - back) > 0.45) { push(run.slice(s0, k)); s0 = k; }
+    }
+    push(run.slice(s0));
+    i = run[run.length - 1] + 1;
   }
-  close();
-  if (notes.length > 4) {
-    const ps = notes.map(n => n.p).sort((p, q) => p - q), med = ps[ps.length >> 1];
-    return notes.filter(n => Math.abs(n.p - med) <= 14);
+  const all = cand.length;
+  let notes = cand.filter(c => c.t1 - c.t0 >= minDur && Math.abs(c.drift) <= maxDrift && c.dev <= maxDev);
+  if (notes.length) {
+    const lv = notes.map(c => c.level).sort((x, y) => x - y), ref = lv[Math.floor(lv.length * 0.75)];
+    notes = notes.filter(c => c.level >= ref * relLevel);
   }
+  if (notes.length > 4) { const m = median(notes.map(c => c.p)); notes = notes.filter(c => Math.abs(c.p - m) <= 14); }
+  notes.candidates = all;
   return notes;
+}
+
+export function singingStats(notes, dur) {
+  let s = 0, c = 0, w = 0, long = 0;
+  for (const nt of notes) { const d = nt.t1 - nt.t0, a = 2 * Math.PI * nt.p; s += d * Math.sin(a); c += d * Math.cos(a); w += d; if (d >= 0.25) long += d; }
+  return { count: notes.length, sung: w, long, grid: w ? Math.hypot(s, c) / w : 0, kept: notes.candidates ? notes.length / notes.candidates : 1, dur };
 }
 
 function fft(re, im) {

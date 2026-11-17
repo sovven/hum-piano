@@ -39,6 +39,7 @@
         <canvas id="camgl"></canvas>
         <div class="micviz" id="micviz"><span class="daisy big"></span><canvas id="micwave" width="600" height="120"></canvas></div>
         <div class="timer" id="timer">0:00</div>
+        <button class="camtoggle" id="b-camtoggle" aria-label="开关相机"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="11" rx="3"/><path d="M16 11l5-3v9l-5-3z"/><path class="slash" d="M4 4l16 17"/></svg></button>
       </div>
       <div class="lens" id="lens">
         <div class="lenspane" data-t="filter"><div class="chips" id="filters"></div></div>
@@ -48,12 +49,12 @@
         </div>
         <div class="lenspane" data-t="expo" hidden>
           <label class="islider bi"><span>曝光</span><input type="range" id="expo" min="-100" max="100" value="0"><b id="expo-v">0</b></label>
-          <button class="ireset" id="expo-reset">复位</button>
+          <label class="islider"><span>质感</span><input type="range" id="soft" min="0" max="100" value="0"><b id="soft-v">0</b></label>
         </div>
         <div class="lenspane" data-t="deco" hidden><div class="iseg" id="decos"></div></div>
         <div class="iseg" id="lenstabs">
           <button data-t="filter" class="on">滤镜</button>
-          <button data-t="expo">曝光</button>
+          <button data-t="expo">调节</button>
           <button data-t="beauty">美颜</button>
           <button data-t="deco">装饰</button>
         </div>
@@ -143,13 +144,26 @@
 
       <div class="row end">
         <button class="btn" id="b-export"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 19h14"/></svg>保存视频</button>
+        <button class="btn ghost" id="b-qr" hidden>扫码下载</button>
+        <button class="btn ghost" id="b-share" hidden>分享到手机 / 邮箱</button>
         <button class="btn ghost" id="b-wav">只要钢琴伴奏</button>
+      </div>
+      <div class="qrpanel" id="qrpanel" hidden>
+        <div class="qr-step" id="qr-up">
+          <p class="worktxt" id="qr-uptxt">正在生成二维码…</p>
+          <div class="bar indet"><i></i></div>
+        </div>
+        <div class="qr-step" id="qr-done" hidden>
+          <div class="qr-box" id="qr-img"></div>
+          <p>手机扫一扫，打开后长按视频保存<small>成片已临时上传，1 小时后自动删除</small></p>
+          <button class="link" id="qr-copy">复制链接</button>
+        </div>
       </div>
       <button class="link" id="b-again">换一段</button>
     </div>
     <div class="lace" aria-hidden="true"></div>
   </section>
-  <p class="foot"><i>made with a little piano</i> · 全部在你的浏览器里完成，不上传任何东西</p>
+  <p class="foot"><i>made with a little piano</i> · 全部在你的浏览器里完成，只有你点「扫码下载」时才会临时上传成片</p>
 </main>
 
 <div class="pop" id="pop" hidden></div>

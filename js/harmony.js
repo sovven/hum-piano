@@ -166,6 +166,13 @@ export function chooseChords(grid, notes, key) {
   const score = D[L - 1][c] / L;
   for (let i = L - 1; i >= 0; i--) { segs[first + i].chord = c; c = B[i][c]; }
   for (let i = 0; i < segs.length; i++) if (i < first || i > last) segs[i].chord = -1;
+  const has = i => notes.some(n => Math.min(n.t1, segs[i].t1) - Math.max(n.t0, segs[i].t0) > 0.03);
+  for (let i = first; i <= last;) {
+    if (has(i)) { i++; continue; }
+    let j = i; while (j + 1 <= last && !has(j + 1)) j++;
+    if (j - i + 1 >= 3) for (let k = i + 1; k <= j; k++) segs[k].chord = -1;
+    i = j + 1;
+  }
   return { vocab, first, last, score };
 }
 
@@ -195,7 +202,9 @@ export function arrange(grid, plan, key, style, dur, notes = []) {
     return { tones, bass, third, fifth };
   };
   for (let i = first; i <= last; i++) {
-    const s = segs[i], ch = vocab[s.chord], v = voic(ch, s);
+    const s = segs[i];
+    if (s.chord < 0) continue;
+    const ch = vocab[s.chord], v = voic(ch, s);
     const isNew = i === first || s.barStart || segs[i - 1].chord !== s.chord;
     let j = i;
     while (j + 1 <= last && !segs[j + 1].barStart && segs[j + 1].chord === s.chord) j++;
@@ -231,7 +240,7 @@ export function arrange(grid, plan, key, style, dur, notes = []) {
     }
   }
   const ls = segs[last];
-  if (ls.t1 < dur - 0.35) {
+  if (ls.chord >= 0 && ls.t1 < dur - 0.35) {
     const v = voic(vocab[ls.chord], ls);
     put(ls.t1, v.bass, .6, dur);
     [v.bass + 12, ...v.tones, v.tones[0] + 12].forEach((m, q) => put(ls.t1 + 0.03 + q * 0.035, m, .44, dur));

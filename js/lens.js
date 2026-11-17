@@ -1,47 +1,61 @@
 export const FILTERS = [
   { id: 'none', name: '原相机', sw: 'linear-gradient(135deg,#d9d4cc,#9fa6ad)', p: {} },
-  { id: 'glow', name: '微曝', sw: 'linear-gradient(135deg,#fffaf0,#f3e3d3)', p: { expo: .26, contrast: -.13, sat: -.06, fade: .05, glow: 1, warm: .014, tint: .012 } },
-  { id: 'cream', name: '奶油', sw: 'linear-gradient(135deg,#fff1cf,#ecc9a0)', p: { expo: .12, contrast: -.1, sat: -.1, fade: .06, glow: .3, warm: .045 } },
-  { id: 'clear', name: '清透', sw: 'linear-gradient(135deg,#f1f8ff,#bcd6f2)', p: { expo: .1, contrast: .03, sat: .06, glow: .2, warm: -.035 } },
-  { id: 'peach', name: '蜜桃', sw: 'linear-gradient(135deg,#ffe6e2,#f5b3b8)', p: { expo: .1, contrast: -.05, sat: .04, fade: .03, glow: .3, warm: .02, tint: .035 } },
-  { id: 'film', name: '胶片', sw: 'linear-gradient(135deg,#d8c9a8,#6f6a58)', p: { expo: .02, contrast: .07, sat: -.18, fade: .075, warm: .03, grain: .07, vig: .32 } },
-  { id: 'mono', name: '黑白', sw: 'linear-gradient(135deg,#f4f4f4,#3c3c3c)', p: { expo: .05, contrast: .1, sat: -1, grain: .045, vig: .2 } }
+  { id: 'glow', name: '微曝', sw: 'linear-gradient(135deg,#ffffff,#f1ece6)', p: { expo: .3, shadows: .25, highlights: -.25, contrast: .04, vib: .08, glow: .7 } },
+  { id: 'clear', name: '清透', sw: 'linear-gradient(135deg,#f4fbff,#cfe3f3)', p: { expo: .12, shadows: .5, highlights: -.1, contrast: .1, vib: .22, temp: -.035 } },
+  { id: 'pale', name: '冷白皮', sw: 'linear-gradient(135deg,#fbf6fb,#dcd9ee)', p: { expo: .2, shadows: .45, highlights: -.15, contrast: .05, sat: -.06, vib: .1, temp: -.075, tint: .03, glow: .25 } },
+  { id: 'cream', name: '奶油肌', sw: 'linear-gradient(135deg,#fff6ea,#f0d9c4)', p: { expo: .2, shadows: .4, highlights: -.3, contrast: -.06, sat: -.1, temp: .02, tint: .012, glow: .35 } },
+  { id: 'fuji', name: '富士', sw: 'linear-gradient(135deg,#c9d6c6,#5c7a78)', p: { expo: -.04, shadows: .12, highlights: -.2, contrast: .16, sat: -.1, vib: -.06, temp: -.03, sr: -.012, sg: .012, sb: .016, hr: .016, hg: .008, hb: -.014, grain: .028 } },
+  { id: 'ccd', name: 'CCD', sw: 'linear-gradient(135deg,#dfe9ff,#6f86c9)', p: { expo: .16, shadows: .1, contrast: .22, sat: .12, vib: .18, temp: -.055, tint: .018, sb: .02, glow: .45, grain: .04, vig: .16 } },
+  { id: 'mono', name: '黑白', sw: 'linear-gradient(135deg,#f4f4f4,#3c3c3c)', p: { expo: .05, contrast: .14, sat: -1, grain: .04, vig: .18 } }
 ];
 export const DECOS = [{ id: 0, name: '无' }, { id: 1, name: '波点' }, { id: 2, name: '光斑' }];
 
-const VS = `attribute vec2 a;varying vec2 v;void main(){v=a*.5+.5;gl_Position=vec4(a,0.,1.);}`;
+const VS = `attribute vec2 a;varying vec2 v;void main(){v=vec2(.5-a.x*.5,a.y*.5+.5);gl_Position=vec4(a,0.,1.);}`;
 const FS = `precision highp float;
 varying vec2 v;uniform sampler2D tex;uniform vec2 px;uniform float aspect,time;
-uniform vec2 fc;uniform vec2 fp[6];uniform float fr,slim,smooth_;
-uniform float expo,contrast,sat,warm,tint,fade,glow,grain,vig;uniform int deco;
-float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+uniform vec2 fc;uniform vec2 fp[6];uniform float fr,slim,smooth_,soft;
+uniform float expo,contrast,sat,vib,temp,tint,shadows,highlights,glow,grain,vig,sr,sg,sb,hr,hg,hb;uniform int deco;
+float hash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
 void main(){
   vec2 uv=v;
   if(slim>0.){for(int i=0;i<6;i++){vec2 d=(uv-fp[i])*vec2(aspect,1.);float q=dot(d,d)/(fr*fr);if(q<1.){float w=1.-q;uv-=(fc-fp[i])*slim*w*w;}}}
   vec3 col=texture2D(tex,uv).rgb;
-  vec3 bs=col,wide=col;float ws=1.;
+  vec3 bs=col,pb=col,wide=col;float ws=1.;
+  vec2 ar=vec2(px.x/px.y,1.);
   for(int i=0;i<16;i++){
     float fi=float(i),an=fi*2.39996,r=sqrt((fi+.5)/16.);
-    vec2 o=vec2(cos(an),sin(an))*r;
-    vec3 s=texture2D(tex,uv+o*px*9.).rgb;
-    vec3 d=s-col;float w=exp(-dot(d,d)*70.);bs+=s*w;ws+=w;
-    wide+=texture2D(tex,uv+o*vec2(px.x/px.y,1.)*.07).rgb;
+    vec2 o=vec2(cos(an),sin(an))*r*ar;
+    vec3 s=texture2D(tex,uv+o*(.011+.006*soft)).rgb;
+    vec3 d=s-col;float w=exp(-dot(d,d)*70.);bs+=s*w;ws+=w;pb+=s;
+    wide+=texture2D(tex,uv+o*.07).rgb;
   }
-  bs/=ws;wide/=17.;
+  bs/=ws;pb/=17.;wide/=17.;
   float cb=-.169*col.r-.331*col.g+.5*col.b,cr=.5*col.r-.419*col.g-.081*col.b;
   float skin=smoothstep(.0,.035,cr)*(1.-smoothstep(.14,.2,cr))*(1.-smoothstep(-.02,.02,cb))*smoothstep(-.22,-.16,cb);
-  float k=smooth_*(.35+.65*skin);
-  col=mix(col,bs,k);col+=skin*smooth_*.035;
-  col=mix(col,wide,glow*.1);col=mix(col,1.-(1.-col)*(1.-wide*(.35+.65*wide)),glow*.42);
+  col=mix(col,bs,smooth_*(.35+.65*skin));col+=skin*smooth_*.03;
+  col=mix(col,pb,soft*.8);
+  col*=vec3(1.+temp,1.-tint,1.-temp);
   col*=pow(2.,expo);
+  float l=luma(col);
+  col*=1.+shadows*pow(1.-clamp(l,0.,1.),3.)*1.4+highlights*pow(clamp(l,0.,1.),3.)*.6;
   col=(col-.5)*(1.+contrast)+.5;
-  float l=dot(col,vec3(.299,.587,.114));
-  col=mix(vec3(l),col,1.+sat);
-  col+=vec3(warm+tint*.6,-tint*.3,-warm+tint*.3);
-  col=col*(1.-fade)+fade;
-  vec3 t=max(col-.78,0.)/.22;col=min(col,.78)+.22*t/(1.+t);
+  l=luma(col);
+  float mx=max(col.r,max(col.g,col.b)),mn=min(col.r,min(col.g,col.b));
+  col=mix(vec3(l),col,max(0.,1.+sat+vib*(1.-clamp((mx-mn)*2.2,0.,1.))));
+  float lc=clamp(l,0.,1.);
+  col+=vec3(sr,sg,sb)*(1.-lc)*(1.-lc)*3.+vec3(hr,hg,hb)*lc*lc*3.;
+  float wl=luma(wide)*pow(2.,expo);
+  col+=wide*pow(clamp((wl-.5)/.5,0.,1.),1.6)*(glow*.42+soft*.12);
+  vec3 t=max(col-.8,0.)/.2;col=min(col,.8)+.2*t/(1.+t);
   col*=1.-vig*smoothstep(.35,.95,length(v-.5)*1.25);
-  col+=(hash(v/px+time)-.5)*grain;
+  float g=grain+soft*.1;
+  if(g>0.){
+    vec2 gp=floor(v/px/(1.+soft*.9))+floor(time*24.)*17.;
+    float n=hash(gp)-.5;
+    vec3 cn=vec3(hash(gp+3.1),hash(gp+7.3),hash(gp+11.7))-.5;
+    col+=(n+cn*soft*.45)*g*(1.25-lc*.7);
+  }
   if(deco==1){
     vec2 p=v*vec2(aspect,1.)*19.;p.x+=mod(floor(p.y),2.)*.5;
     float d=length(fract(p)-.5);
@@ -77,8 +91,8 @@ export function createLens(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  const U = n => gl.getUniformLocation(pr, n);
-  const GRADE = ['expo', 'contrast', 'sat', 'warm', 'tint', 'fade', 'glow', 'grain', 'vig'];
+  const loc = {}, U = n => loc[n] ??= gl.getUniformLocation(pr, n);
+  const GRADE = ['expo', 'contrast', 'sat', 'vib', 'temp', 'tint', 'shadows', 'highlights', 'glow', 'grain', 'vig', 'sr', 'sg', 'sb', 'hr', 'hg', 'hb'];
   const cur = Object.fromEntries(GRADE.map(k => [k, 0]));
   let face = null;
   return {
@@ -92,10 +106,10 @@ export function createLens(canvas) {
       const target = (FILTERS.find(f => f.id === o.filter) || FILTERS[0]).p;
       for (const k of GRADE) { cur[k] += ((target[k] || 0) - cur[k]) * .18; gl.uniform1f(U(k), cur[k] + (k === 'expo' ? o.expo || 0 : 0)); }
       gl.uniform2f(U('px'), 1 / w, 1 / h); gl.uniform1f(U('aspect'), w / h); gl.uniform1f(U('time'), time % 1000);
-      gl.uniform1f(U('smooth_'), o.smooth); gl.uniform1i(U('deco'), o.deco);
+      gl.uniform1f(U('smooth_'), o.smooth); gl.uniform1f(U('soft'), o.soft || 0); gl.uniform1i(U('deco'), o.deco);
       if (face && o.slim > 0) {
         gl.uniform1f(U('slim'), o.slim * .045); gl.uniform2f(U('fc'), face.c[0], face.c[1]); gl.uniform1f(U('fr'), face.r);
-        gl.uniform2fv(U('fp'), new Float32Array(face.p));
+        gl.uniform2fv(U('fp[0]'), new Float32Array(face.p));
       } else gl.uniform1f(U('slim'), 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
