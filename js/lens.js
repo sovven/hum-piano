@@ -13,13 +13,13 @@ export const DECOS = [{ id: 0, name: '无' }, { id: 1, name: '波点' }, { id: 2
 const VS = `attribute vec2 a;varying vec2 v;void main(){v=vec2(.5-a.x*.5,a.y*.5+.5);gl_Position=vec4(a,0.,1.);}`;
 const FS = `precision highp float;
 varying vec2 v;uniform sampler2D tex;uniform vec2 px;uniform float aspect,time;
-uniform vec2 fc;uniform vec2 fp[6];uniform float fr,slim,smooth_,soft;
+uniform vec2 fc[4];uniform vec2 fp[24];uniform float fr[4],fw[4];uniform float slim,smooth_,soft;
 uniform float expo,contrast,sat,vib,temp,tint,shadows,highlights,glow,grain,vig,sr,sg,sb,hr,hg,hb,hard,blur;uniform int deco;
 float hash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
 float luma(vec3 c){return dot(c,vec3(.299,.587,.114));}
 void main(){
   vec2 uv=v;
-  if(slim>0.){for(int i=0;i<6;i++){vec2 d=(uv-fp[i])*vec2(aspect,1.);float q=dot(d,d)/(fr*fr);if(q<1.){float w=1.-q;uv-=(fc-fp[i])*slim*w*w;}}}
+  if(slim>0.){vec2 off=vec2(0.);for(int j=0;j<4;j++){if(fw[j]>0.){for(int i=0;i<6;i++){vec2 q0=fp[j*6+i];vec2 d=(v-q0)*vec2(aspect,1.);float q=dot(d,d)/(fr[j]*fr[j]);if(q<1.){float w=1.-q;off+=(fc[j]-q0)*slim*fw[j]*w*w;}}}}uv-=off;}
   vec3 col=texture2D(tex,uv).rgb;
   vec3 bs=col,pb=col,wide=col;float ws=1.;
   vec2 ar=vec2(px.x/px.y,1.);
@@ -94,9 +94,10 @@ export function createLens(canvas) {
   const loc = {}, U = n => loc[n] ??= gl.getUniformLocation(pr, n);
   const GRADE = ['expo', 'contrast', 'sat', 'vib', 'temp', 'tint', 'shadows', 'highlights', 'glow', 'grain', 'vig', 'sr', 'sg', 'sb', 'hr', 'hg', 'hb', 'hard', 'blur'];
   const cur = Object.fromEntries(GRADE.map(k => [k, 0]));
-  let face = null, held = null, amt = 0;
+  let faces = [], amt = 0, lastT = 0;
+  const FC = new Float32Array(8), FR = new Float32Array(4), FW = new Float32Array(4), FP = new Float32Array(48);
   return {
-    setFace(f) { face = f; if (f) held = f; },
+    setFace(f) { if (f) faces = f; },
     render(video, o, time) {
       const w = video.videoWidth, h = video.videoHeight;
       if (!w) return;
@@ -104,13 +105,17 @@ export function createLens(canvas) {
       gl.viewport(0, 0, w, h);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
       const target = (FILTERS.find(f => f.id === o.filter) || FILTERS[0]).p;
-      for (const k of GRADE) { cur[k] += ((target[k] || 0) - cur[k]) * .18; gl.uniform1f(U(k), cur[k] + (k === 'expo' ? o.expo || 0 : 0)); }
+      const dt = lastT ? Math.min(.2, Math.max(0, time - lastT)) : 1; lastT = time;
+      const ease = 1 - Math.exp(-dt / .045);
+      for (const k of GRADE) { cur[k] += ((target[k] || 0) - cur[k]) * ease; gl.uniform1f(U(k), cur[k] + (k === 'expo' ? o.expo || 0 : 0)); }
       gl.uniform2f(U('px'), 1 / w, 1 / h); gl.uniform1f(U('aspect'), w / h); gl.uniform1f(U('time'), time % 1000);
       gl.uniform1f(U('smooth_'), o.smooth); gl.uniform1f(U('soft'), o.soft || 0); gl.uniform1i(U('deco'), o.deco);
-      amt += ((face && o.slim > 0 ? o.slim : 0) - amt) * (face ? .25 : .08);
-      if (held && amt > 0.004) {
-        gl.uniform1f(U('slim'), amt * .045); gl.uniform2f(U('fc'), held.c[0], held.c[1]); gl.uniform1f(U('fr'), held.r);
-        gl.uniform2fv(U('fp[0]'), new Float32Array(held.p));
+      amt += ((o.slim > 0 ? o.slim : 0) - amt) * (1 - Math.exp(-dt / .06));
+      const live = faces.slice(0, 4);
+      if (live.length && amt > 0.004) {
+        FW.fill(0);
+        live.forEach((t, j) => { FC[j * 2] = t.c[0]; FC[j * 2 + 1] = t.c[1]; FR[j] = t.r || .01; FW[j] = t.w; FP.set(t.p, j * 12); });
+        gl.uniform1f(U('slim'), amt * .045); gl.uniform2fv(U('fc[0]'), FC); gl.uniform1fv(U('fr[0]'), FR); gl.uniform1fv(U('fw[0]'), FW); gl.uniform2fv(U('fp[0]'), FP);
       } else gl.uniform1f(U('slim'), 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
@@ -118,40 +123,54 @@ export function createLens(canvas) {
 }
 
 const JAW = [132, 172, 150, 361, 397, 379];
-let fl = null, flP = null, last = null, lastSeen = 0, vel = null;
-export const faceStat = { seen: 0, held: 0, lost: 0 };
-const HOLD = 900;
+const MAXF = 4, HOLD = 900;
+let fl = null, flP = null, tracks = [], lastTs = 0;
+export const faceStat = { seen: 0, held: 0, lost: 0, faces: 0 };
 export function loadFace() {
   return flP ||= (async () => {
     const base = new URL('../vendor/mp/', import.meta.url).href;
     const m = await import(base + 'vision_bundle.js');
     const fs = await m.FilesetResolver.forVisionTasks(base + 'wasm');
-    const mk = delegate => m.FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: new URL('../vendor/face_landmarker.task', import.meta.url).href, delegate }, runningMode: 'VIDEO', numFaces: 1, minFaceDetectionConfidence: .3, minFacePresenceConfidence: .3, minTrackingConfidence: .3 });
+    const mk = delegate => m.FaceLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: new URL('../vendor/face_landmarker.task', import.meta.url).href, delegate }, runningMode: 'VIDEO', numFaces: MAXF, minFaceDetectionConfidence: .3, minFacePresenceConfidence: .3, minTrackingConfidence: .3 });
     try { fl = await mk('GPU'); } catch { fl = await mk('CPU'); }
     return true;
   })().catch(e => { flP = null; throw e; });
 }
 export function trackFace(video, ts) {
-  if (!fl || !video.videoWidth) return null;
+  if (!fl || !video.videoWidth) return [];
   let res = null; try { res = fl.detectForVideo(video, ts); } catch { }
-  const lm = res && res.faceLandmarks && res.faceLandmarks[0];
-  if (!lm) {
-    if (last && ts - lastSeen < HOLD) {
-      if (vel) { const d = Math.max(0, 1 - (ts - lastSeen) / 250); last = { c: last.c.map((x, i) => x + vel.c[i] * d), p: last.p.map((x, i) => x + vel.p[i % 2] * d), r: last.r }; }
-      faceStat.held++; return last;
-    }
-    faceStat.lost++; last = null; vel = null; return null;
+  const dt = lastTs ? Math.min(200, Math.max(0, ts - lastTs)) : 16; lastTs = ts;
+  const asp = video.videoWidth / video.videoHeight;
+  const dets = ((res && res.faceLandmarks) || []).map(lm => {
+    const P = i => [lm[i].x, 1 - lm[i].y];
+    return { c: P(2), p: JAW.flatMap(P), r: Math.hypot((lm[234].x - lm[454].x) * asp, lm[234].y - lm[454].y) * .42 };
+  });
+  const dist = (a, b) => Math.hypot((a.c[0] - b.c[0]) * asp, a.c[1] - b.c[1]);
+  const pairs = [];
+  tracks.forEach((t, ti) => dets.forEach((d, di) => { const e = dist(t, d); if (e < Math.max(t.r, d.r) * 1.6) pairs.push([e, ti, di]); }));
+  pairs.sort((a, b) => a[0] - b[0]);
+  const tUsed = new Set(), dUsed = new Set();
+  for (const [, ti, di] of pairs) {
+    if (tUsed.has(ti) || dUsed.has(di)) continue;
+    tUsed.add(ti); dUsed.add(di);
+    const t = tracks[ti], f = dets[di];
+    const move = dist(t, f) / (f.r || 1), k = Math.min(1, .45 + move * 6);
+    const c = f.c.map((x, i) => t.c[i] + (x - t.c[i]) * k);
+    t.vel = [(c[0] - t.c[0]) * .5, (c[1] - t.c[1]) * .5];
+    t.c = c; t.p = f.p.map((x, i) => t.p[i] + (x - t.p[i]) * k); t.r = t.r + (f.r - t.r) * k; t.seen = ts;
   }
-  faceStat.seen++;
-  const asp = video.videoWidth / video.videoHeight, P = i => [lm[i].x, 1 - lm[i].y];
-  const f = { c: P(2), p: JAW.flatMap(P), r: Math.hypot((lm[234].x - lm[454].x) * asp, lm[234].y - lm[454].y) * .42 };
-  if (last) {
-    const move = Math.hypot(f.c[0] - last.c[0], f.c[1] - last.c[1]) / (f.r || 1);
-    const k = Math.min(1, .45 + move * 6);
-    const c = f.c.map((x, i) => last.c[i] + (x - last.c[i]) * k);
-    vel = { c: [(c[0] - last.c[0]) * .5, (c[1] - last.c[1]) * .5], p: [(c[0] - last.c[0]) * .5, (c[1] - last.c[1]) * .5] };
-    f.c = c; f.p = f.p.map((x, i) => last.p[i] + (x - last.p[i]) * k); f.r = last.r + (f.r - last.r) * Math.min(1, k);
+  dets.forEach((f, di) => { if (!dUsed.has(di) && tracks.length < MAXF) tracks.push({ ...f, vel: null, seen: ts, w: 0 }); });
+  const fade = 1 - Math.exp(-dt / 90);
+  for (const t of tracks) {
+    const alive = ts - t.seen < HOLD;
+    if (t.seen === ts) faceStat.seen++;
+    else if (alive) {
+      faceStat.held++;
+      if (t.vel) { const d = Math.max(0, 1 - (ts - t.seen) / 250); t.c = t.c.map((x, i) => x + t.vel[i] * d); t.p = t.p.map((x, i) => x + t.vel[i % 2] * d); }
+    } else faceStat.lost++;
+    t.w += ((alive ? 1 : 0) - t.w) * fade;
   }
-  lastSeen = ts;
-  return last = f;
+  tracks = tracks.filter(t => ts - t.seen < HOLD || t.w > .01);
+  faceStat.faces = tracks.length;
+  return tracks;
 }
